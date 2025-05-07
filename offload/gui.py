@@ -245,7 +245,47 @@ class MainWindow(QMainWindow):
         self.setFont(font)
 
         self.sourceSize = 0
-        self.destPath = self.settings.destination()
+        
+        # Pre-flight checks before calling self.settings.destination()
+        try:
+            logging.info(f"PRE_DEST_CALL_DIAG: About to interact with self.settings.")
+            logging.info(f"PRE_DEST_CALL_DIAG: Type of self.settings: {type(self.settings)}")
+            logging.shutdown()
+            if hasattr(self.settings, 'destination'):
+                logging.info(f"PRE_DEST_CALL_DIAG: self.settings has attribute 'destination'. Type: {type(self.settings.destination)}")
+                logging.shutdown()
+                # For extreme check, see if we can even get the method object itself
+                # method_obj = getattr(self.settings, 'destination')
+                # logging.info(f"PRE_DEST_CALL_DIAG: getattr(self.settings, 'destination') is {method_obj}")
+                # logging.shutdown()
+            else:
+                logging.info("PRE_DEST_CALL_DIAG: self.settings has NO 'destination' attribute.")
+                logging.shutdown()
+        except Exception as e_pre_log:
+            logging.critical(f"PRE_DEST_CALL_DIAG: CRITICAL - Error in pre-call logging for self.settings.destination: {e_pre_log}", exc_info=True)
+            logging.shutdown()
+
+        # The problematic call
+        try:
+            logging.info("PRE_DEST_CALL_DIAG: Attempting to call self.settings.destination()...")
+            logging.shutdown()
+            self.destPath = self.settings.destination()
+            logging.info(f"PRE_DEST_CALL_DIAG: self.settings.destination() call completed.")
+            logging.shutdown()
+        except Exception as e_dest_call: # Catch Python-level exceptions from the call itself
+            logging.critical(f"PRE_DEST_CALL_DIAG: CRITICAL PYTHON EXCEPTION during self.settings.destination() call: {e_dest_call}", exc_info=True)
+            logging.shutdown()
+            # Fallback self.destPath if the call fails at Python level (though SIGABRT is more likely)
+            self.destPath = Path().home() 
+
+        # Log self.destPath value and type AFTER the call
+        try:
+            logging.info(f"INIT_UI_DIAG: self.destPath value after call: '{self.destPath}' (type: {type(self.destPath)})")
+            logging.shutdown()
+        except Exception as e_log_init:
+            logging.critical(f"INIT_UI_DIAG: CRITICAL - Error logging self.destPath post-call: {e_log_init}", exc_info=True)
+            logging.shutdown()
+
         self.destSize = 0
         self.iconSize = 48
         self.colors = COLORS
@@ -303,7 +343,19 @@ class MainWindow(QMainWindow):
         mainColsLayout.addSpacerItem(QSpacerItem(100, 10, QSizePolicy.MinimumExpanding))
 
         # Destination column
-        mainColsLayout.addLayout(self.destColumn())
+        try:
+            logging.info("INIT_UI_DIAG: Calling self.destColumn()...")
+            logging.shutdown()
+            dest_col_layout = self.destColumn()
+            logging.info("INIT_UI_DIAG: self.destColumn() returned.")
+            logging.shutdown()
+            mainColsLayout.addLayout(dest_col_layout)
+        except Exception as e_destcol:
+            logging.critical(f"INIT_UI_DIAG: CRITICAL - Error calling or adding self.destColumn(): {e_destcol}")
+            logging.shutdown()
+            # Add a placeholder if it fails
+            mainColsLayout.addLayout(QVBoxLayout())
+
         mainColsLayout.addSpacerItem(QSpacerItem(100, 10, QSizePolicy.MinimumExpanding))
 
         # mainLayout
@@ -329,9 +381,32 @@ class MainWindow(QMainWindow):
         mainPathsLayout.addWidget(QLabel('Destination:'))
         self.destPathLabel = self.pathLabel(self.destPath)
         self.destPathLabel.setObjectName('dest-path')
-        self.destPathLabel.setText(self.pathLabelText(self.destPath))
+        try:
+            logging.info(f"INIT_UI_DIAG: Attempting self.destPathLabel.setText(self.pathLabelText(self.destPath)) for path: {self.destPath}")
+            logging.shutdown()
+            path_label_text_val = self.pathLabelText(self.destPath)
+            logging.info(f"INIT_UI_DIAG: self.pathLabelText returned: '{path_label_text_val}'")
+            logging.shutdown()
+            self.destPathLabel.setText(path_label_text_val)
+            logging.info("INIT_UI_DIAG: Successfully set destPathLabel text.")
+            logging.shutdown()
+        except Exception as e_dpl_settext:
+            logging.critical(f"INIT_UI_DIAG: CRITICAL - Error in destPathLabel.setText or pathLabelText: {e_dpl_settext}")
+            logging.shutdown()
+            try:
+                self.destPathLabel.setText("Error displaying path")
+            except: pass # Ignore if this also fails
+
         mainPathsLayout.addWidget(self.destPathLabel)
-        self.updateDestInfo()
+        try:
+            logging.info("INIT_UI_DIAG: Calling self.updateDestInfo()...")
+            logging.shutdown()
+            self.updateDestInfo()
+            logging.info("INIT_UI_DIAG: self.updateDestInfo() returned.")
+            logging.shutdown()
+        except Exception as e_upd_dest_info:
+            logging.critical(f"INIT_UI_DIAG: CRITICAL - Error calling self.updateDestInfo(): {e_upd_dest_info}")
+            logging.shutdown()
 
         mainLayout.addLayout(mainPathsLayout)
         # Progress
@@ -446,7 +521,22 @@ class MainWindow(QMainWindow):
         self.sourceInfoLabel.setText(f'{self.offloader.source_files.count} files, {self.offloader.source_files.hsize}')
 
     def updateDestInfo(self):
-        self.destInfoLabel.setText(f'{disk_usage(self.destPath, human=True).free} free')
+        try:
+            if self.destPath:
+                # Ensure utils.disk_usage is called, which is now robust
+                usage = utils.disk_usage(self.destPath, human=True) 
+                if usage.free == 0 and usage.total == 0: # Indicates an error from robust disk_usage
+                    self.destInfoLabel.setText("Free: N/A")
+                else:
+                    self.destInfoLabel.setText(f'{usage.free} free')
+            else:
+                self.destInfoLabel.setText("Free: N/A")
+        except Exception as e:
+            logging.error(f"Error updating destination info: {e}")
+            try:
+                self.destInfoLabel.setText("Free: Error")
+            except Exception as e2:
+                logging.error(f"Critical error setting destInfoLabel fallback text: {e2}")
 
     def sourceColumn(self):
         # Source title
@@ -476,7 +566,61 @@ class MainWindow(QMainWindow):
 
     def destColumn(self):
         # dest title
-        self.destTitleLabel = QLabel(self.destPath.name)
+        try:
+            logging.info(f"DEST_COL_DIAG: Creating destTitleLabel. self.destPath: {self.destPath} (type: {type(self.destPath)})") 
+            logging.shutdown()
+            dest_display_name = "N/A"
+
+            if isinstance(self.destPath, str):
+                try:
+                    # If it's a string (potentially NAS path), get basename via Path conversion temporarily for display
+                    # This is a controlled point where Path(NAS_string) might occur.
+                    logging.info(f"DEST_COL_DIAG: self.destPath is string '{self.destPath}'. Attempting Path() for .name.")
+                    logging.shutdown()
+                    temp_path_obj = Path(self.destPath)
+                    dest_display_name = temp_path_obj.name
+                    logging.info(f"DEST_COL_DIAG: For string self.destPath, .name is '{dest_display_name}'")
+                    logging.shutdown()
+                except Exception as e_str_name:
+                    logging.critical(f"DEST_COL_DIAG: CRITICAL - Error getting .name from string self.destPath '{self.destPath}': {e_str_name}. This could be the SIGABRT point for NAS string.", exc_info=True)
+                    logging.shutdown()
+                    dest_display_name = "Error (str-path)"
+            elif isinstance(self.destPath, Path):
+                if hasattr(self.destPath, 'name'):
+                    try:
+                        # If it's a Path object, get .name. This is the SIGABRT point if it's a NAS Path object.
+                        logging.info(f"DEST_COL_DIAG: self.destPath is Path. Attempting .name for {self.destPath}")
+                        logging.shutdown()
+                        dest_display_name = self.destPath.name
+                        logging.info(f"DEST_COL_DIAG: For Path self.destPath, .name is '{dest_display_name}'")
+                        logging.shutdown()
+                    except Exception as e_path_name:
+                        logging.critical(f"DEST_COL_DIAG: CRITICAL - Error accessing .name for Path self.destPath {self.destPath}: {e_path_name}. This IS THE SIGABRT point for NAS Path object.", exc_info=True)
+                        logging.shutdown()
+                        dest_display_name = "Error (path-obj)"
+                else:
+                    logging.info(f"DEST_COL_DIAG: self.destPath is Path but has no .name attribute: {self.destPath}")
+                    logging.shutdown()
+                    # dest_display_name remains "N/A"
+            else: # self.destPath is None or other type
+                logging.info(f"DEST_COL_DIAG: self.destPath is None or type '{type(self.destPath)}'. Using 'N/A'.")
+                logging.shutdown()
+                # dest_display_name remains "N/A"
+            
+            self.destTitleLabel = QLabel(str(dest_display_name)) # Ensure string for QLabel
+            logging.info(f"DEST_COL_DIAG: QLabel created with text: '{str(dest_display_name)}'")
+            logging.shutdown()
+
+        except Exception as e_title:
+            logging.critical(f"DEST_COL_DIAG: CRITICAL - Error creating destTitleLabel: {e_title}")
+            logging.shutdown()
+            # Fallback
+            self.destTitleLabel = QLabel("Error")
+            try:
+                logging.info("DEST_COL_DIAG: destTitleLabel fallback to 'Error'")
+                logging.shutdown()
+            except: pass
+
         self.destTitleLabel.setMinimumWidth(250)
         self.destTitleLabel.setObjectName('dest-title')
         self.destTitleLabel.setAlignment(QtCore.Qt.AlignCenter)
@@ -499,11 +643,21 @@ class MainWindow(QMainWindow):
         return destLayout
 
     def browse(self, start_dir=''):
-        """Open a file browser dialog"""
+        """Open a file browser dialog, returns RAW STRING path or None."""
         dialog = QFileDialog()
-        folder_path = dialog.getExistingDirectory(None, 'Select Folder', str(start_dir), QFileDialog.ShowDirsOnly)
-        if folder_path:
-            return Path(folder_path)
+        folder_path_str = None
+        try:
+            logging.info("BROWSE_RAW: Calling QFileDialog.getExistingDirectory...")
+            logging.shutdown()
+            folder_path_str = dialog.getExistingDirectory(None, 'Select Folder', str(start_dir), QFileDialog.ShowDirsOnly)
+            logging.info(f"BROWSE_RAW: QFileDialog.getExistingDirectory returned: '{folder_path_str}'")
+            logging.shutdown()
+            # DO NOT CONVERT TO PATH HERE. Return raw string.
+            return folder_path_str 
+        except Exception as e:
+            logging.critical(f"BROWSE_RAW: CRITICAL PYTHON EXCEPTION: {e}", exc_info=True)
+            logging.shutdown()
+            return None
 
     def browseSource(self):
         start_dir = self.sourcePath
@@ -518,28 +672,241 @@ class MainWindow(QMainWindow):
             self.updateSource()
 
     def browseDest(self):
-        # Update ui
-        path = self.browse(start_dir=self.destPath)
-        if path:
-            self.destPath = path
-            self.settings.latest_destination = self.destPath
-            self.updateDest()
-            # Update offload
-            self.offloader.destination = self.destPath
+        raw_path_str_from_dialog = None
+        try:
+            logging.info("BROWSE_DEST_RAW: Calling self.browse() ...")
+            logging.shutdown()
+            # Revert diagnostic hardcoding, use self.destPath (which can be str or Path)
+            start_dir_for_browse = str(self.destPath if self.destPath is not None else Path().home())
+            logging.info(f"BROWSE_DEST_RAW: Using start_dir: '{start_dir_for_browse}' for QFileDialog.")
+            logging.shutdown()
+            raw_path_str_from_dialog = self.browse(start_dir=start_dir_for_browse)
+            logging.info(f"BROWSE_DEST_RAW: self.browse() returned raw string: '{raw_path_str_from_dialog}'")
+            logging.shutdown()
+        except Exception as e: 
+            logging.critical(f"BROWSE_DEST_RAW: CRITICAL PYTHON EXCEPTION calling self.browse(): {e}", exc_info=True)
+            logging.shutdown()
+            raw_path_str_from_dialog = None
+
+        if raw_path_str_from_dialog:
+            # Step 1: Attempt to save raw string to settings
+            try:
+                logging.info(f"BROWSE_DEST_RAW_STEP1: Attempting to set settings.latest_destination with raw string: '{raw_path_str_from_dialog}'")
+                logging.shutdown()
+                self.settings.latest_destination = raw_path_str_from_dialog # Settings class handles Path conversion & str()
+                logging.info(f"BROWSE_DEST_RAW_STEP1: Successfully set settings.latest_destination.")
+                logging.shutdown()
+            except Exception as e_settings:
+                logging.critical(f"BROWSE_DEST_RAW_STEP1: CRITICAL PYTHON EXCEPTION during settings.latest_destination: {e_settings}", exc_info=True)
+                logging.shutdown()
+                # Attempt to update UI to show error, then return to prevent further processing
+                try:
+                    self.destTitleLabel.setText("Error Saving Settings")
+                    self.destPathLabel.setText(f"Path: '{raw_path_str_from_dialog[:30]}...'") # Show truncated raw path
+                    self.destInfoLabel.setText("Free: Error")
+                except Exception as e_ui_settings:
+                    logging.error(f"BROWSE_DEST_RAW_STEP1: Failed to set error UI: {e_ui_settings}", exc_info=True)
+                    logging.shutdown()
+                return # Stop further processing if settings save fails at Python level
+
+            # Step 2: Attempt to create Path object
+            path_obj_for_nas = None
+            try:
+                logging.info(f"BROWSE_DEST_RAW_STEP2: Attempting Path('{raw_path_str_from_dialog}')...")
+                logging.shutdown()
+                path_obj_for_nas = Path(raw_path_str_from_dialog)
+                logging.info(f"BROWSE_DEST_RAW_STEP2: Successfully created Path object: {path_obj_for_nas}")
+                logging.shutdown()
+            except Exception as e_path_create:
+                logging.critical(f"BROWSE_DEST_RAW_STEP2: CRITICAL PYTHON EXCEPTION during Path() creation: {e_path_create}", exc_info=True)
+                logging.shutdown()
+                try:
+                    self.destTitleLabel.setText("Error Processing Path String")
+                    self.destPathLabel.setText(f"Path: '{raw_path_str_from_dialog[:30]}...'")
+                    self.destInfoLabel.setText("Free: Error")
+                except Exception as e_ui_path:
+                    logging.error(f"BROWSE_DEST_RAW_STEP2: Failed to set error UI: {e_ui_path}", exc_info=True)
+                    logging.shutdown()
+                return # Stop further processing
+            
+            # Step 3: Assign to self.destPath
+            try:
+                logging.info(f"BROWSE_DEST_RAW_STEP3: Assigning Path object to self.destPath: {path_obj_for_nas}")
+                logging.shutdown()
+                self.destPath = path_obj_for_nas
+                logging.info(f"BROWSE_DEST_RAW_STEP3: Successfully assigned to self.destPath.")
+                logging.shutdown()
+            except Exception as e_assign:
+                logging.critical(f"BROWSE_DEST_RAW_STEP3: CRITICAL PYTHON EXCEPTION during self.destPath assignment: {e_assign}", exc_info=True)
+                logging.shutdown()
+                # Unlikely to fail here if Path object creation succeeded, but good practice
+                return
+
+            # Step 4: Attempt to log self.destPath (which triggers str() on Path object)
+            try:
+                logging.info(f"BROWSE_DEST_RAW_STEP4: Attempting to log self.destPath (triggers str()): {self.destPath}")
+                logging.shutdown()
+            except Exception as e_log_str:
+                logging.critical(f"BROWSE_DEST_RAW_STEP4: CRITICAL PYTHON EXCEPTION during logging f-string (str(self.destPath)): {e_log_str}", exc_info=True)
+                logging.shutdown()
+                # If this fails, the crash is str(Path_object) related
+                # UI might be in an intermediate state, updateDest might not be called.
+                return
+
+            # Step 5: Call updateDest()
+            try:
+                logging.info(f"BROWSE_DEST_RAW_STEP5: Calling self.updateDest() for path: {self.destPath}")
+                logging.shutdown()
+                self.updateDest()
+                logging.info(f"BROWSE_DEST_RAW_STEP5: self.updateDest() completed for path: {self.destPath}")
+                logging.shutdown()
+            except Exception as e_update_dest:
+                logging.critical(f"BROWSE_DEST_RAW_STEP5: CRITICAL PYTHON EXCEPTION during self.updateDest(): {e_update_dest}", exc_info=True)
+                logging.shutdown()
+                # UI might be partially updated or error state shown within updateDest already.
+
+            # Original logic for offloader destination update
+            if self.offloader: 
+                try:
+                    logging.info(f"BROWSE_DEST_RAW: Updating offloader destination with: {self.destPath}")
+                    logging.shutdown()
+                    self.offloader.destination = self.destPath
+                    logging.info("BROWSE_DEST_RAW: Successfully updated offloader destination.")
+                    logging.shutdown()
+                except Exception as e_offloader:
+                    logging.error(f"BROWSE_DEST_RAW: Error updating offloader destination: {e_offloader}", exc_info=True)
+                    logging.shutdown()
+            else:
+                logging.warning("BROWSE_DEST_RAW: Offloader not initialized when trying to set destination path.")
+                logging.shutdown()
+        else:
+            logging.warning("BROWSE_DEST_RAW: No path received from self.browse().")
+            logging.shutdown()
 
     def updateSource(self):
         # Update ui
-        self.sourceTitleLabel.setText(self.sourcePath.name)
+        current_path_obj = None
+        path_name = "N/A"
+
+        if isinstance(self.sourcePath, str):
+            try:
+                # Assuming sourcePath string is a valid local path if it's a string here
+                current_path_obj = Path(self.sourcePath)
+                path_name = current_path_obj.name
+                logging.info(f"UPDATE_SOURCE_DIAG: Converted sourcePath string '{self.sourcePath}' to Path. Name: '{path_name}'")
+            except Exception as e:
+                logging.error(f"UPDATE_SOURCE_DIAG: Error converting sourcePath string '{self.sourcePath}' to Path: {e}")
+                path_name = "Error"
+        elif isinstance(self.sourcePath, Path):
+            current_path_obj = self.sourcePath
+            path_name = self.sourcePath.name
+            logging.info(f"UPDATE_SOURCE_DIAG: sourcePath is Path object. Name: '{path_name}'")
+        else: # It's None or unexpected type
+            logging.info(f"UPDATE_SOURCE_DIAG: sourcePath is None or unexpected type: {type(self.sourcePath)}")
+            path_name = "N/A" # Stays N/A or as initialized
+        logging.shutdown()
+
+        self.sourceTitleLabel.setText(path_name)
+        # pathLabelText should handle str, Path, or None for self.sourcePath
         self.sourcePathLabel.setText(self.pathLabelText(self.sourcePath))
 
         # Update offload
-        self.offloader.source = self.sourcePath
-        self.updateSourceInfo()
+        if self.offloader:
+            if current_path_obj: # current_path_obj is guaranteed to be Path or None here
+                self.offloader.source = current_path_obj
+                logging.info(f"UPDATE_SOURCE_DIAG: Set offloader.source to Path: {current_path_obj}")
+            elif isinstance(self.sourcePath, str): # Should ideally be caught by current_path_obj logic
+                # This case is less likely if above logic is correct, but as a fallback:
+                try:
+                    logging.warning(f"UPDATE_SOURCE_DIAG: sourcePath is string '{self.sourcePath}', attempting direct Path() conversion for offloader.")
+                    self.offloader.source = Path(self.sourcePath) 
+                except Exception as e_offload_path:
+                    logging.error(f"UPDATE_SOURCE_DIAG: Failed to convert string sourcePath '{self.sourcePath}' to Path for offloader: {e_offload_path}")
+                    self.offloader.source = None # Or handle error appropriately
+            else: # self.sourcePath is None or other non-Path/non-str type
+                self.offloader.source = None
+                logging.info(f"UPDATE_SOURCE_DIAG: Set offloader.source to None as sourcePath is {type(self.sourcePath)}")
+            logging.shutdown()
+            self.updateSourceInfo() # This uses self.offloader.source_files which should be updated by Offloader.source setter
+        else:
+            logging.warning("UPDATE_SOURCE_DIAG: Offloader not initialized.")
+            logging.shutdown()
 
     def updateDest(self):
-        self.destTitleLabel.setText(self.destPath.name)
-        self.destPathLabel.setText(self.pathLabelText(self.destPath))
-        self.updateDestInfo()
+        """Update all the destination related UI elements. Path label, progress bar"""
+        try:
+            if self.destPath:
+                if isinstance(self.destPath, str):
+                    # If it's a string (e.g. NAS path from settings or fresh from dialog that became string)
+                    # For display name, try to get basename by converting to Path temporarily
+                    try:
+                        logging.info(f"UPDATE_DEST_DIAG: self.destPath is string '{self.destPath}', getting .name via Path() for title.")
+                        logging.shutdown()
+                        temp_path = Path(self.destPath)
+                        self.destTitleLabel.setText(temp_path.name)
+                    except Exception as e_title_str:
+                        logging.error(f"UPDATE_DEST_DIAG: Error getting name for string destPath '{self.destPath}': {e_title_str}")
+                        self.destTitleLabel.setText("Error")
+                elif isinstance(self.destPath, Path):
+                    self.destTitleLabel.setText(self.destPath.name)
+                else: # None or other type
+                    self.destTitleLabel.setText("N/A")
+            else: # self.destPath is None
+                self.destTitleLabel.setText("N/A")
+            logging.info(f"UPDATE_DEST_DIAG: destTitleLabel set to '{self.destTitleLabel.text()}'")
+            logging.shutdown()
+        except Exception as e:
+            logging.error(f"UPDATE_DEST_DIAG: Error setting destination title label: {e}", exc_info=True)
+            try:
+                self.destTitleLabel.setText("Error")
+            except Exception as e2:
+                logging.error(f"UPDATE_DEST_DIAG: Critical error setting destTitleLabel fallback text: {e2}")
+            logging.shutdown()
+
+        try:
+            path_text = self.pathLabelText(self.destPath) # self.destPath can be str or Path
+            self.destPathLabel.setText(path_text)
+            logging.info(f"UPDATE_DEST_DIAG: destPathLabel set to '{path_text}'")
+            logging.shutdown()
+        except Exception as e:
+            logging.error(f"UPDATE_DEST_DIAG: Error setting destination path label: {e}", exc_info=True)
+            try:
+                self.destPathLabel.setText("Error displaying path")
+            except Exception as e2:
+                logging.error(f"UPDATE_DEST_DIAG: Critical error setting destPathLabel fallback text: {e2}")
+            logging.shutdown()
+
+        try:
+            self.updateDestInfo() # Call the now robust updateDestInfo
+            logging.info("UPDATE_DEST_DIAG: updateDestInfo() called.")
+            logging.shutdown()
+        except Exception as e:
+            logging.error(f"UPDATE_DEST_DIAG: Error calling updateDestInfo from updateDest: {e}", exc_info=True)
+            # Fallback for destInfoLabel if updateDestInfo itself fails badly
+            try:
+                self.destInfoLabel.setText("Free: Error") 
+            except Exception as e2:
+                logging.error(f"UPDATE_DEST_DIAG: Critical error setting destInfoLabel fallback from updateDest: {e2}")
+            logging.shutdown()
+
+        # Save to settings
+        try:
+            if self.destPath: # Only save if destPath is not None
+                # Use the property setter for latest_destination, which handles resolve() and writing to JSON
+                # self.destPath here could be a string (if from settings initially, or if browseDest returned string that wasn't converted)
+                # or a Path object (if browseDest converted it to Path for self.destPath, or if it was a default local Path).
+                # The latest_destination setter expects a path string or Path convertible to string.
+                logging.info(f"UPDATE_DEST_DIAG: Attempting to save to settings.latest_destination with value: '{self.destPath}' (type: {type(self.destPath)})")
+                logging.shutdown()
+                self.settings.latest_destination = str(self.destPath) # Ensure it's a string for the setter
+                logging.info(f'UPDATE_DEST_DIAG: Destination successfully saved to settings.latest_destination.')
+                logging.shutdown()
+            else:
+                logging.warning("UPDATE_DEST_DIAG: Attempted to save a None destination path to settings. Skipped.")
+                logging.shutdown()
+        except Exception as e_save:
+            logging.error(f"UPDATE_DEST_DIAG: Error saving destination to settings.latest_destination: {e_save}", exc_info=True)
+            logging.shutdown()
 
     def pathLabel(self, path):
         text = path
@@ -551,10 +918,88 @@ class MainWindow(QMainWindow):
         label.setTextInteractionFlags(QtCore.Qt.LinksAccessibleByMouse | QtCore.Qt.TextSelectableByMouse)
         return label
 
-    def pathLabelText(self, path: Path):
-        return f'<a href="file:///{path.resolve()}" style="color:{self.colors["primary"]};text-decoration:none;">' \
-               f'{path.resolve()}' \
-               f'</a>'
+    def pathLabelText(self, path_input: any):
+        """Make path shorter if it is too long.
+        Return the path as a string"""
+        try:
+            logging.info(f"PATH_LABEL_TEXT_DIAG: Received path_input: '{path_input}' (type: {type(path_input)})")
+            logging.shutdown()
+            
+            path_to_process = path_input
+            path_string = ""
+
+            if path_to_process is None:
+                logging.info("PATH_LABEL_TEXT_DIAG: path_input is None, returning 'No path selected'")
+                logging.shutdown()
+                return 'No path selected'
+
+            if isinstance(path_to_process, str):
+                path_string = path_to_process # Already a string
+                logging.info(f"PATH_LABEL_TEXT_DIAG: path_input is already string: '{path_string}'")
+                logging.shutdown()
+            elif isinstance(path_to_process, Path):
+                # This is THE DANGER ZONE if path_to_process is a NAS Path object.
+                # We must attempt str() conversion here and catch potential SIGABRT source.
+                logging.info(f"PATH_LABEL_TEXT_DIAG: path_input is Path object. Attempting str(): {path_to_process}")
+                logging.shutdown()
+                try:
+                    path_string = str(path_to_process)
+                    logging.info(f"PATH_LABEL_TEXT_DIAG: str(Path) successful, path_string: '{path_string}'")
+                    logging.shutdown()
+                except Exception as e_str_conv:
+                    # This will catch Python-level exceptions. A SIGABRT will crash before this.
+                    logging.critical(f"PATH_LABEL_TEXT_DIAG: CRITICAL PYTHON EXCEPTION - str(Path) FAILED for {path_to_process}: {e_str_conv}", exc_info=True)
+                    logging.shutdown()
+                    return "Error converting Path to string (SIGABRT likely occurred)"
+            else: # Other unexpected type
+                logging.warning(f"PATH_LABEL_TEXT_DIAG: path_input is unexpected type '{type(path_to_process)}'. Attempting str().")
+                logging.shutdown()
+                try:
+                    path_string = str(path_to_process)
+                    logging.info(f"PATH_LABEL_TEXT_DIAG: str(unexpected type) result: '{path_string}'")
+                    logging.shutdown()
+                except Exception as e_unknown_str:
+                    logging.error(f"PATH_LABEL_TEXT_DIAG: Failed to str(unexpected type {type(path_to_process)}): {e_unknown_str}", exc_info=True)
+                    logging.shutdown()
+                    return "Error: Invalid path type"
+
+            # Shorten path if it is too long
+            if len(path_string) > 50:
+                # For shortening, we need a Path object if we don't have one, 
+                # or if the original was a string to begin with.
+                path_obj_for_parts = None
+                if isinstance(path_to_process, Path):
+                    path_obj_for_parts = path_to_process # Use original Path obj if available
+                else: # It was a string or other, try to make a Path from path_string
+                    try:
+                        logging.info(f"PATH_LABEL_TEXT_DIAG: Path string ('{path_string}') > 50. Attempting Path() for shortening parts.")
+                        logging.shutdown()
+                        path_obj_for_parts = Path(path_string) # DANGER for NAS string
+                        logging.info(f"PATH_LABEL_TEXT_DIAG: Path(path_string) for shortening successful.")
+                        logging.shutdown()
+                    except Exception as e_path_conv_parts:
+                        logging.critical(f"PATH_LABEL_TEXT_DIAG: CRITICAL - Path(path_string) for shortening FAILED for '{path_string}': {e_path_conv_parts}. This could be SIGABRT for NAS string.", exc_info=True)
+                        logging.shutdown()
+                        # Return the long string if Path conversion fails, rather than erroring further.
+                        return path_string 
+
+                if path_obj_for_parts and hasattr(path_obj_for_parts, 'parts') and path_obj_for_parts.parts:
+                    shortened_path_string = f'{path_obj_for_parts.parts[0]}...{path_obj_for_parts.parts[-1]}'
+                    logging.info(f"PATH_LABEL_TEXT_DIAG: Shortened path to: '{shortened_path_string}'")
+                    logging.shutdown()
+                    return shortened_path_string
+                else:
+                    logging.warning(f"PATH_LABEL_TEXT_DIAG: Path string '{path_string}' > 50 but couldn't get parts. Returning full string.")
+                    logging.shutdown()
+                    return path_string 
+            
+            logging.info(f"PATH_LABEL_TEXT_DIAG: Path string '{path_string}' <= 50. Returning as is.")
+            logging.shutdown()
+            return path_string
+        except Exception as e_outer:
+            logging.critical(f"PATH_LABEL_TEXT_DIAG: CRITICAL - Outer unhandled exception in pathLabelText for input '{path_input}': {e_outer}", exc_info=True)
+            logging.shutdown()
+            return "Error processing path (outer)"
 
     @staticmethod
     def volumes():

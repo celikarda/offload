@@ -24,6 +24,7 @@ from pathlib import PosixPath
 from datetime import datetime
 from collections import namedtuple
 from offload import APP_DATA_PATH, LOGS_PATH, REPORTS_PATH
+import psutil
 
 
 class Preset:
@@ -388,16 +389,71 @@ class Settings:
         Returns:
             Path: path to latest offload destination
         """
-        dest = self._read_setting('latest_destination')
-        # Return home path if no former destination stored
-        if dest:
-            dest_path = Path(dest)
-        else:
-            dest_path = Path().home()
-        if dest_path.is_dir():
-            return dest_path
+        logging.info("LATEST_DEST_PROP_DIAG: Entered latest_destination property.")
+        logging.shutdown()
+        dest = self._read_setting('latest_destination') # Reads JSON
+        logging.info(f"LATEST_DEST_PROP_DIAG: _read_setting('latest_destination') returned: '{dest}' (type: {type(dest)})")
+        logging.shutdown()
 
-        return Path().home()
+        dest_path = None
+        if dest and dest != 'None': # Ensure dest is not None and not the string 'None'
+            try:
+                logging.info(f"LATEST_DEST_PROP_DIAG: Attempting Path('{dest}')...")
+                logging.shutdown()
+                dest_path = Path(dest)
+                logging.info(f"LATEST_DEST_PROP_DIAG: Path('{dest}') successful. dest_path: {dest_path}")
+                logging.shutdown()
+            except Exception as e_path_create:
+                logging.critical(f"LATEST_DEST_PROP_DIAG: CRITICAL - Path('{dest}') FAILED: {e_path_create}. Falling back to home().")
+                logging.shutdown()
+                # Fallback to prevent returning None if Path() fails, which could cause issues later
+                try:
+                    return Path().home()
+                except Exception as e_home_fallback:
+                    logging.critical(f"LATEST_DEST_PROP_DIAG: CRITICAL - Fallback Path().home() FAILED: {e_home_fallback}. Returning current dir Path('.')")
+                    logging.shutdown()
+                    return Path(".")
+        else:
+            logging.info("LATEST_DEST_PROP_DIAG: dest from _read_setting is None or 'None'. Using Path().home().")
+            logging.shutdown()
+            try:
+                dest_path = Path().home()
+                logging.info(f"LATEST_DEST_PROP_DIAG: Set dest_path to Path().home(): {dest_path}")
+                logging.shutdown()
+            except Exception as e_home:
+                logging.critical(f"LATEST_DEST_PROP_DIAG: CRITICAL - Path().home() FAILED: {e_home}. Returning current dir Path('.')")
+                logging.shutdown()
+                return Path(".")
+
+        # Check if the created dest_path (either from 'dest' or home()) actually exists and is a directory
+        try:
+            logging.info(f"LATEST_DEST_PROP_DIAG: Attempting dest_path.is_dir() for: {dest_path}")
+            logging.shutdown()
+            is_directory = dest_path.is_dir()
+            logging.info(f"LATEST_DEST_PROP_DIAG: dest_path.is_dir() returned: {is_directory}")
+            logging.shutdown()
+            if is_directory:
+                logging.info(f"LATEST_DEST_PROP_DIAG: Returning dest_path: {dest_path}")
+                logging.shutdown()
+                return dest_path
+            else:
+                logging.warning(f"LATEST_DEST_PROP_DIAG: dest_path '{dest_path}' is not a directory. Falling back to Path().home().")
+                logging.shutdown()
+        except Exception as e_isdir:
+            # This is where a SIGABRT might occur if str(dest_path) is called by an f-string or by .is_dir() internals
+            logging.critical(f"LATEST_DEST_PROP_DIAG: CRITICAL - Error during dest_path.is_dir() for '{dest_path}': {e_isdir}. Falling back to Path().home().")
+            logging.shutdown()
+        
+        # Fallback to home if is_dir check failed or path wasn't a dir
+        try:
+            logging.info("LATEST_DEST_PROP_DIAG: Defaulting to return Path().home() due to previous checks.")
+            logging.shutdown()
+            final_home_path = Path().home()
+            return final_home_path
+        except Exception as e_final_home:
+            logging.critical(f"LATEST_DEST_PROP_DIAG: CRITICAL - Final fallback Path().home() FAILED: {e_final_home}. Returning Path('.')")
+            logging.shutdown()
+            return Path(".")
 
     @latest_destination.setter
     def latest_destination(self, path):
@@ -429,17 +485,75 @@ class Settings:
         self._write_settings(default_destination=str(path.resolve()))
 
     def destination(self):
-        """Get latest offload destination
-
-        Returns:
-            Path: path to latest offload destination
+        """Return the destination path. If no latest_destination is set,
+        return default_destination. If no default_destination is set, return home
+        
+        IMPORTANT DIAGNOSTIC CHANGE:
+        If latest_destination exists and is not 'None', this will return it as a RAW STRING
+        to prevent premature Path() object creation for potentially problematic (e.g., NAS) paths.
+        Otherwise, for defaults, it returns a Path object.
         """
-        if self.default_destination:
-            return self.default_destination
-        elif self.latest_destination:
-            return self.latest_destination
+        logging.info("SETTINGS_DEST_METHOD_DIAG: Entered destination() method.")
+        logging.shutdown() # Ensure this first log is flushed.
 
-        return Path().home()
+        latest_dest_value_from_prop = None
+        try:
+            logging.info("SETTINGS_DEST_METHOD_DIAG: Attempting to access self.latest_destination property...")
+            logging.shutdown()
+            latest_dest_value_from_prop = self.latest_destination # THIS IS THE PROPERTY ACCESS
+            logging.info(f"SETTINGS_DEST_METHOD_DIAG: self.latest_destination property access successful. Value: '{latest_dest_value_from_prop}' (type: {type(latest_dest_value_from_prop)})")
+            logging.shutdown()
+        except Exception as e_prop_access:
+            logging.critical(f"SETTINGS_DEST_METHOD_DIAG: CRITICAL PYTHON EXCEPTION accessing self.latest_destination property: {e_prop_access}", exc_info=True)
+            logging.shutdown()
+            # If property access itself fails at Python level, fallback (though SIGABRT is more likely)
+            # Fall through to default logic
+            pass # Explicitly doing nothing, will proceed to check default_destination logic
+
+        # Check the value obtained from the property
+        if latest_dest_value_from_prop and str(latest_dest_value_from_prop) != 'None':
+            # The LATEST_DEST_PROP_DIAG logs inside the property getter should tell us if Path() was made
+            # This method is now designed to just return the string if the property getter succeeded
+            # and returned a string (or a Path that can be str()-ed here safely).
+            logging.info(f"SETTINGS_DEST_METHOD_DIAG: latest_destination property had a value ('{latest_dest_value_from_prop}'). Returning str() of it.")
+            logging.shutdown()
+            return str(latest_dest_value_from_prop) 
+
+        logging.info("SETTINGS_DEST_METHOD_DIAG: latest_destination (from property) is None, 'None', or prop access failed. Checking default_destination.")
+        logging.shutdown()
+
+        default_dest_path_obj = None
+        if self.default_destination and str(self.default_destination) != 'None': # Access default_destination property
+            logging.info(f"SETTINGS_DEST_METHOD_DIAG: default_destination property value: '{self.default_destination}'")
+            logging.shutdown()
+            try:
+                # Assuming default_destination property returns a Path object or a convertible string for local paths
+                default_dest_path_obj = Path(self.default_destination) 
+                logging.info(f"SETTINGS_DEST_METHOD_DIAG: Path(default_destination) is: {default_dest_path_obj}")
+                logging.shutdown()
+                if default_dest_path_obj.exists() and default_dest_path_obj.is_dir():
+                    logging.info(f"SETTINGS_DEST_METHOD_DIAG: Returning default_destination ('{default_dest_path_obj}') as Path object.")
+                    logging.shutdown()
+                    return default_dest_path_obj
+                else:
+                    logging.warning(f"SETTINGS_DEST_METHOD_DIAG: Default destination '{default_dest_path_obj}' does not exist or not a dir.")
+                    logging.shutdown()
+            except Exception as e:
+                logging.error(f"SETTINGS_DEST_METHOD_DIAG: Error processing default_destination '{self.default_destination}': {e}. Falling back.")
+                logging.shutdown()
+        else:
+            logging.info("SETTINGS_DEST_METHOD_DIAG: default_destination property is None or 'None'.")
+            logging.shutdown()
+
+        logging.info("SETTINGS_DEST_METHOD_DIAG: Falling back to Path.home() as Path object.")
+        logging.shutdown()
+        try:
+            home_path = Path.home()
+            return home_path
+        except Exception as e:
+            logging.critical(f"SETTINGS_DEST_METHOD_DIAG: CRITICAL - Failed to get Path.home(): {e}. Returning Path('.') as last resort.")
+            logging.shutdown()
+            return Path(".") # Last resort fallback
 
     @property
     def structure(self):
@@ -859,15 +973,32 @@ def random_string(length=50):
 
 
 def disk_usage(path: Path, human=False):
-    """Return disk usage statistics about the given path."""
-    DiskUsage = namedtuple('DiskUsage', 'total used free')
-    st = os.statvfs(path)
-    free = st.f_bavail * st.f_frsize
-    total = st.f_blocks * st.f_frsize
-    used = (st.f_blocks - st.f_bfree) * st.f_frsize
+    """Get disk usage statistics about the given path. Will return the total, used and free space using psutil"""
+    empty_usage = namedtuple('usage', 'total used free percent')(0, 0, 0, 0)
+    try:
+        path_obj = Path(path)
+        if not path_obj.exists():
+            logging.error(f'{path} does not exist.')
+            return empty_usage
+    except Exception as e:
+        logging.error(f"Error checking existence of path '{path}': {e}")
+        return empty_usage
+
+    path_str = str(path_obj) # Use path_obj after successful existence check
+    try:
+        usage = psutil.disk_usage(path_str)
+        # Add a percent value to the named tuple
+        usage = usage._replace(percent=int(usage.percent))
+    except (psutil.Error, OSError, Exception) as e: # Catch psutil specific, OS, and general errors
+        logging.error(f"Error getting disk usage for '{path_str}': {e}")
+        return empty_usage
+
     if human:
-        return DiskUsage(convert_size(total), convert_size(used), convert_size(free))
-    return DiskUsage(total, used, free)
+        return namedtuple('usage', 'total used free percent')(convert_size(usage.total),
+                                                           convert_size(usage.used),
+                                                           convert_size(usage.free),
+                                                           usage.percent)
+    return usage
 
 
 def validate_string(invalid_string):
