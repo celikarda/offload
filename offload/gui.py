@@ -5,9 +5,8 @@ import psutil
 import logging
 from datetime import datetime
 from PyQt5.QtWidgets import QApplication, QWidget, QDialog, QMainWindow
-from PyQt5.QtWidgets import QLineEdit, QPushButton, QLabel, QFileDialog, QProgressBar, QComboBox
-from PyQt5.QtWidgets import QSpacerItem, QSizePolicy, QFrame
-from PyQt5.QtWidgets import QGridLayout, QVBoxLayout, QHBoxLayout, QFormLayout
+from PyQt5.QtWidgets import QLineEdit, QPushButton, QLabel, QFileDialog, QProgressBar, QComboBox, QListWidget
+from PyQt5.QtWidgets import QSpacerItem, QSizePolicy, QFrame, QFormLayout, QHBoxLayout, QVBoxLayout
 from PyQt5.QtWidgets import QStyle
 from PyQt5.QtGui import QIcon, QPixmap, QFontDatabase, QFont
 from PyQt5 import QtCore
@@ -15,7 +14,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from pathlib import Path
 
 from offload import VERSION, utils
-from offload.utils import setup_logger, disk_usage, Settings, File
+from offload.utils import setup_logger, disk_usage, Settings, File, PresetManager
 from offload.app import Offloader
 from offload.styles import STYLES, COLORS
 
@@ -212,6 +211,226 @@ class SettingsDialog(QDialog):
         logging.info(f'Prefix changed to {self.prefixOptions[self.prefixCombo.currentIndex()]}')
 
 
+class PresetManagementDialog(QDialog):
+    def __init__(self, preset_manager: PresetManager, parent=None):
+        super().__init__(parent)
+        self.preset_manager = preset_manager
+        self.current_selected_preset_name = None
+
+        self.setWindowTitle("Manage Presets")
+        self.setMinimumWidth(700) # Increased width for more fields
+        
+        # Layouts
+        mainLayout = QVBoxLayout()
+        formAndListLayout = QHBoxLayout() # For preset list and edit form
+        
+        # Left side: Preset List
+        listLayout = QVBoxLayout()
+        listLayout.addWidget(QLabel("Presets:"))
+        self.presetListWidget = QListWidget()
+        self.presetListWidget.currentItemChanged.connect(self.loadPresetForEditing)
+        listLayout.addWidget(self.presetListWidget)
+        
+        presetButtonsLayout = QHBoxLayout()
+        self.newPresetButton = QPushButton("New")
+        self.newPresetButton.clicked.connect(self.createNewPreset)
+        presetButtonsLayout.addWidget(self.newPresetButton)
+        self.deletePresetButton = QPushButton("Delete")
+        self.deletePresetButton.clicked.connect(self.deleteSelectedPreset)
+        presetButtonsLayout.addWidget(self.deletePresetButton)
+        listLayout.addLayout(presetButtonsLayout)
+        
+        formAndListLayout.addLayout(listLayout, 1) # Assign stretch factor 1
+
+        # Right side: Preset Edit Form
+        editFormLayout = QFormLayout()
+        editFormLayout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow) # Allow fields to expand
+
+        self.presetNameEdit = QLineEdit()
+        editFormLayout.addRow("Preset Name:", self.presetNameEdit)
+
+        # Target Location
+        targetLocationLayout = QHBoxLayout()
+        self.targetLocationEdit = QLineEdit()
+        targetLocationLayout.addWidget(self.targetLocationEdit)
+        browseTargetButton = QPushButton("Browse...")
+        browseTargetButton.clicked.connect(self.browseTargetLocation)
+        targetLocationLayout.addWidget(browseTargetButton)
+        editFormLayout.addRow("Target Location:", targetLocationLayout)
+
+        # Folder Structure (similar to SettingsDialog)
+        self.structureCombo = QComboBox()
+        self.structureOptions = {0: 'original', 1: 'taken_date', 2: 'year_month', 3: 'year', 4: 'flat'}
+        self.structureCombo.addItems(['Keep original', 'YYYY/YYYY-MM-DD', 'YYYY/MM', 'YYYY', 'Flat'])
+        editFormLayout.addRow("Folder Structure:", self.structureCombo)
+
+        # Filename Prefix (similar to SettingsDialog)
+        self.prefixCombo = QComboBox()
+        self.prefixOptions = {0: 'empty', 1: 'taken_date', 2: 'taken_date_time'}
+        self.prefixCombo.addItems(['No prefix', 'YYMMDD', 'YYMMDD_hhmmss'])
+        editFormLayout.addRow("Filename Prefix:", self.prefixCombo)
+        
+        # Filename Preset (similar to SettingsDialog)
+        self.filenameCombo = QComboBox()
+        self.filenameOptions = {0: None, 1: 'camera_make', 2: 'camera_model'} # Using None for original
+        self.filenameCombo.addItems(['Keep original', 'Camera brand', 'Camera model'])
+        editFormLayout.addRow("Filename:", self.filenameCombo)
+
+        self.fileTypesEdit = QLineEdit()
+        self.fileTypesEdit.setPlaceholderText(".jpg, .cr2, .mp4, .mov (comma-separated)")
+        editFormLayout.addRow("File Types (extensions):", self.fileTypesEdit)
+        
+        formAndListLayout.addLayout(editFormLayout, 2) # Assign stretch factor 2 (wider)
+        mainLayout.addLayout(formAndListLayout)
+
+        # Bottom Buttons (Save, Close)
+        dialogButtonsLayout = QHBoxLayout()
+        self.savePresetButton = QPushButton("Save Preset")
+        self.savePresetButton.clicked.connect(self.saveCurrentPreset)
+        dialogButtonsLayout.addWidget(self.savePresetButton)
+        
+        self.closeButton = QPushButton("Close")
+        self.closeButton.clicked.connect(self.accept) # QDialog.accept() closes dialog
+        dialogButtonsLayout.addWidget(self.closeButton)
+        mainLayout.addLayout(dialogButtonsLayout)
+
+        self.setLayout(mainLayout)
+        self.populatePresetList()
+        self.updateDeleteButtonState()
+
+
+    def populatePresetList(self):
+        self.presetListWidget.clear()
+        preset_names = self.preset_manager.get_preset_names()
+        for name in preset_names:
+            self.presetListWidget.addItem(name)
+        if preset_names:
+            self.presetListWidget.setCurrentRow(0) # Select first item by default
+
+    def loadPresetForEditing(self, current_item, previous_item):
+        if not current_item:
+            self.clearForm()
+            self.current_selected_preset_name = None
+            self.updateDeleteButtonState()
+            return
+
+        self.current_selected_preset_name = current_item.text()
+        preset_data = self.preset_manager.get_preset(self.current_selected_preset_name)
+
+        if preset_data:
+            self.presetNameEdit.setText(self.current_selected_preset_name)
+            self.targetLocationEdit.setText(preset_data.get('target_location', ''))
+            
+            structure_val = preset_data.get('folder_structure')
+            structure_idx = list(self.structureOptions.values()).index(structure_val) if structure_val in self.structureOptions.values() else 0
+            self.structureCombo.setCurrentIndex(structure_idx)
+
+            prefix_val = preset_data.get('filename_prefix')
+            prefix_idx = list(self.prefixOptions.values()).index(prefix_val) if prefix_val in self.prefixOptions.values() else 0
+            self.prefixCombo.setCurrentIndex(prefix_idx)
+
+            filename_val = preset_data.get('filename_preset') # This can be None
+            filename_idx = 0 # Default to 'Keep original'
+            if filename_val is None: # Explicit check for None for 'Keep original'
+                 filename_idx = 0
+            elif filename_val in self.filenameOptions.values():
+                 filename_idx = list(self.filenameOptions.values()).index(filename_val)
+            self.filenameCombo.setCurrentIndex(filename_idx)
+            
+            file_types_list = preset_data.get('file_types', [])
+            self.fileTypesEdit.setText(", ".join(file_types_list))
+        else:
+            self.clearForm() # Should not happen if name is from list
+        self.updateDeleteButtonState()
+
+    def clearForm(self):
+        self.presetNameEdit.clear()
+        self.targetLocationEdit.clear()
+        self.structureCombo.setCurrentIndex(0)
+        self.prefixCombo.setCurrentIndex(0)
+        self.filenameCombo.setCurrentIndex(0)
+        self.fileTypesEdit.clear()
+        self.current_selected_preset_name = None
+
+    def createNewPreset(self):
+        self.presetListWidget.clearSelection() # Deselect any item
+        self.clearForm()
+        self.presetNameEdit.setFocus()
+        self.current_selected_preset_name = None # Indicate it's a new preset
+        self.updateDeleteButtonState()
+
+
+    def saveCurrentPreset(self):
+        new_preset_name = self.presetNameEdit.text().strip()
+        if not new_preset_name:
+            # TODO: Show an error message (e.g., QMessageBox)
+            logging.error("Preset name cannot be empty.")
+            return
+
+        settings = {
+            'target_location': self.targetLocationEdit.text().strip(),
+            'folder_structure': self.structureOptions[self.structureCombo.currentIndex()],
+            'filename_prefix': self.prefixOptions[self.prefixCombo.currentIndex()],
+            'filename_preset': self.filenameOptions[self.filenameCombo.currentIndex()],
+            'file_types': [ext.strip().lower() for ext in self.fileTypesEdit.text().split(',') if ext.strip()]
+        }
+        
+        # Basic validation for target_location
+        if not settings['target_location']:
+            logging.error("Target location cannot be empty for preset.")
+            # TODO: Show QMessageBox
+            return
+            
+        # Ensure file_types start with a dot if they don't have one
+        validated_file_types = []
+        for ext in settings['file_types']:
+            if not ext.startswith('.'):
+                validated_file_types.append('.' + ext)
+            else:
+                validated_file_types.append(ext)
+        settings['file_types'] = validated_file_types
+
+
+        # If it's a new preset or name changed, check for overwrite
+        if self.current_selected_preset_name != new_preset_name and self.preset_manager.get_preset(new_preset_name):
+            # TODO: Confirm overwrite with QMessageBox
+            logging.warning(f"Preset '{new_preset_name}' already exists. Overwriting.")
+
+        # If renaming an existing preset, delete the old one first if the name changed
+        if self.current_selected_preset_name and self.current_selected_preset_name != new_preset_name:
+            self.preset_manager.delete_preset(self.current_selected_preset_name)
+            
+        success = self.preset_manager.add_or_update_preset(new_preset_name, settings)
+        if success:
+            self.populatePresetList()
+            # Try to reselect the saved preset by its (potentially new) name
+            items = self.presetListWidget.findItems(new_preset_name, QtCore.Qt.MatchExactly)
+            if items:
+                self.presetListWidget.setCurrentItem(items[0])
+            self.current_selected_preset_name = new_preset_name # Update current selection tracking
+        self.updateDeleteButtonState()
+
+
+    def deleteSelectedPreset(self):
+        if self.current_selected_preset_name:
+            # TODO: Confirm deletion with QMessageBox
+            self.preset_manager.delete_preset(self.current_selected_preset_name)
+            self.populatePresetList()
+            self.clearForm() # Clear form as the selected item is gone
+        self.updateDeleteButtonState()
+
+    def browseTargetLocation(self):
+        # Similar to MainWindow.browseDest, but sets the QLineEdit here
+        start_dir = self.targetLocationEdit.text() or Path().home()
+        dialog = QFileDialog()
+        folder_path_str = dialog.getExistingDirectory(self, 'Select Target Location', str(start_dir), QFileDialog.ShowDirsOnly)
+        if folder_path_str:
+            self.targetLocationEdit.setText(folder_path_str)
+            
+    def updateDeleteButtonState(self):
+        self.deletePresetButton.setEnabled(self.current_selected_preset_name is not None)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -222,6 +441,10 @@ class MainWindow(QMainWindow):
 
         self.offloader = None
         self.settings = Settings()
+        self.preset_manager = PresetManager()
+        self.active_preset_name = None
+        self.loaded_preset_settings_snapshot = None
+        self.preset_is_modified = False
 
         # Paths
         self.sourcePath = None
@@ -319,6 +542,21 @@ class MainWindow(QMainWindow):
 
     def initUI(self):
         mainLayout = QVBoxLayout()
+
+        # Presets Layout
+        presetsLayout = QHBoxLayout()
+        presetsLayout.addWidget(QLabel("Preset:"))
+        self.presetComboBox = QComboBox()
+        self.presetComboBox.addItem("None (Default Settings)") # Default option
+        self.populatePresetsComboBox()
+        self.presetComboBox.activated[str].connect(self.applyPreset) # Connect signal
+        presetsLayout.addWidget(self.presetComboBox)
+        
+        managePresetsButton = QPushButton("Manage Presets...")
+        managePresetsButton.clicked.connect(self.openPresetManagementDialog) # Placeholder for now
+        presetsLayout.addWidget(managePresetsButton)
+        mainLayout.addLayout(presetsLayout)
+
         mainColsLayout = QHBoxLayout()
 
         # mainColsLayout
@@ -442,15 +680,140 @@ class MainWindow(QMainWindow):
 
         self._centralWidget.setLayout(mainLayout)
 
+    def populatePresetsComboBox(self):
+        current_selection = self.presetComboBox.currentText()
+        self.presetComboBox.clear()
+        self.presetComboBox.addItem("None (Default Settings)")
+        preset_names = self.preset_manager.get_preset_names()
+        for name in preset_names:
+            self.presetComboBox.addItem(name)
+        
+        # Restore previous selection if it still exists
+        index = self.presetComboBox.findText(current_selection)
+        if index != -1:
+            self.presetComboBox.setCurrentIndex(index)
+        else:
+            self.active_preset_name = None # Clear active preset if it was deleted
+            # If the previously active preset was deleted, apply default settings
+            if current_selection != "None (Default Settings)": # Avoid re-applying if already on default
+                 self.applyPreset("None (Default Settings)")
+
+    def applyPreset(self, preset_name_or_default_text: str):
+        # Strip "(edited)" suffix if present, as self.active_preset_name should be the base name
+        if preset_name_or_default_text.endswith(" (edited)"):
+            base_preset_name = preset_name_or_default_text[:-9]
+        else:
+            base_preset_name = preset_name_or_default_text
+
+        if base_preset_name == "None (Default Settings)" or not base_preset_name:
+            self.active_preset_name = None
+            self.loaded_preset_settings_snapshot = None
+            self.preset_is_modified = False
+            logging.info("Applying default settings.")
+            
+            # Revert self.settings to system defaults/last saved general settings
+            self.settings.structure = self.settings._read_setting('structure') or self.settings._default_settings['structure']
+            self.settings.prefix = self.settings._read_setting('prefix') or self.settings._default_settings['prefix']
+            self.settings.filename = self.settings._read_setting('filename') # Can be None
+            
+            # Update destPath from general settings
+            self.destPath = self.settings.destination() # This handles logic for latest_destination, default_destination, or home
+
+            # Update Offloader with default settings
+            if self.offloader:
+                self.offloader.update_from_settings(preset_settings=None)
+            self._update_preset_display_in_combobox() # Update display for default settings
+        else:
+            self.active_preset_name = base_preset_name # Store the base name
+            preset_settings_from_manager = self.preset_manager.get_preset(self.active_preset_name)
+            if preset_settings_from_manager:
+                logging.info(f"Applying preset: {self.active_preset_name}")
+                
+                # Update self.settings to reflect the preset
+                self.settings.structure = preset_settings_from_manager.get('folder_structure')
+                self.settings.prefix = preset_settings_from_manager.get('filename_prefix')
+                self.settings.filename = preset_settings_from_manager.get('filename_preset')
+                # Update destPath from preset
+                self.destPath = preset_settings_from_manager.get('target_location') 
+                if self.destPath:
+                    self.settings.latest_destination = str(self.destPath)
+
+                # Take a snapshot for modification tracking
+                self.loaded_preset_settings_snapshot = {
+                    'target_location': str(self.destPath) if self.destPath else None, # Store as string for consistent comparison
+                    'folder_structure': self.settings.structure,
+                    'filename_prefix': self.settings.prefix,
+                    'filename_preset': self.settings.filename,
+                    'file_types': preset_settings_from_manager.get('file_types', []) # Get from original preset data
+                }
+                self.preset_is_modified = False
+
+                # Update Offloader with preset settings
+                if self.offloader:
+                    self.offloader.update_from_settings(preset_settings=preset_settings_from_manager)
+            else:
+                logging.warning(f"Preset '{self.active_preset_name}' not found. Applying default settings.")
+                self.presetComboBox.setCurrentIndex(0) # Switch to "None"
+                self.active_preset_name = None # Explicitly set to None before recursive call
+                self.applyPreset("None (Default Settings)") # Recursive call to apply defaults
+                return # Important to return after recursive call to avoid double UI update
+
+        # Common UI updates for both preset and default application
+        # Update destination path display elements
+        if self.destPath: # destPath could be str (from preset or settings.destination()) or Path
+            # Convert to Path for consistent handling, Path(str_path) is generally safe for local paths.
+            # For NAS/problematic paths, this might be where issues arise if not careful.
+            # Preset target_location is saved as str, settings.destination() can also return str.
+            current_dest_path_for_ui = Path(self.destPath) if isinstance(self.destPath, str) else self.destPath
+            
+            try:
+                self.destPathLabel.setText(self.pathLabelText(current_dest_path_for_ui))
+                self.destTitleLabel.setText(current_dest_path_for_ui.name if current_dest_path_for_ui else "N/A")
+            except Exception as e:
+                logging.error(f"Error updating destination UI for path '{current_dest_path_for_ui}': {e}")
+                self.destPathLabel.setText("Error displaying path")
+                self.destTitleLabel.setText("Error")
+        else: # Should not happen if settings.destination() has fallbacks
+            self.destPathLabel.setText("No destination selected")
+            self.destTitleLabel.setText("N/A")
+
+        self.updateDestInfo() # Updates free space, relies on self.destPath
+        if self.offloader: # Ensure offloader exists before trying to update source info
+             self.updateSourceInfo() # Re-filter files based on new settings/preset
+        
+        self._update_preset_display_in_combobox() # Update display after applying
+        
+        # The example label in SettingsDialog relies on self.settings, which should now be up-to-date.
+        # No need to call self.updateExamplePathLabel() if it's a placeholder.
+
+    def updateExamplePathLabel(self):
+        # This method would construct the example path string based on current
+        # settings (either from preset or default, as reflected in self.offloader or self.settings)
+        # For now, we'll assume the SettingsDialog's example label is the primary one and is updated
+        # when that dialog is open. If an example is needed on the main window, it needs its own label and logic.
+        # For now, if the SettingsDialog is the one showing this, it should be updated when settings change.
+        # The current SettingsDialog updates its example based on its own internal settings state, 
+        # which are linked to the global self.settings object.
+        # If presets are to influence this, the SettingsDialog must be aware of presets or the main settings object must reflect the active preset.
+        pass # Placeholder
+
+    def openPresetManagementDialog(self):
+        # This will be implemented in the next step
+        dialog = PresetManagementDialog(self.preset_manager, self)
+        if dialog.exec_(): # True if dialog is accepted (e.g. Close button)
+            self.populatePresetsComboBox() # Refresh dropdown if presets changed
+            # Re-apply the currently selected preset in the main window's combobox
+            # This handles cases where the active preset was edited or deleted.
+            current_main_window_preset_selection = self.presetComboBox.currentText()
+            self.applyPreset(current_main_window_preset_selection)
+
     def settingsDialog(self):
         """Open the settings dialog to make changes to settings"""
         # app = QApplication(sys.argv)
         logging.debug(f'Settings dialog opened')
-        settings = SettingsDialog()
-        settings.exec_()
-
-        # Load settings from file
-        # self.offloader.update_from_settings()
+        settings_dialog = SettingsDialog() # Renamed to avoid conflict with self.settings
+        settings_dialog.exec_()
+        self._check_and_update_preset_modified_status()
 
     def updateProgressBar(self, progress):
         self.progressBar.setValue(int(progress.get('percentage', 0)))
@@ -484,7 +847,45 @@ class MainWindow(QMainWindow):
         self.offloadButton.setStyleSheet(
             f"#offload-btn {{background:{self.colors['green']};color:{self.colors['bg']};}}")
         self.offloadButton.clicked.disconnect()
-        self.offloadButton.clicked.connect(self.close)
+        self.offloadButton.clicked.connect(self.reset_app)
+
+    def reset_app(self):
+        # Reset progress bar
+        self.progressBar.setValue(0)
+        self.progressBar.setStyleSheet("") # Reset to default
+
+        # Reset progress labels
+        self.progressFiles.setText('1. Pick a source folder')
+        self.progressPercent.setText('2. Pick a destination folder')
+        self.progressTime.setText('3. Press Offload')
+
+        # Reset offload button
+        self.offloadButton.setText('Offload')
+        self.offloadButton.setStyleSheet("") # Reset to global stylesheet for #offload-btn
+        try:
+            self.offloadButton.clicked.disconnect()
+        except TypeError: # No connection to disconnect
+            pass
+        self.offloadButton.clicked.connect(self.offload)
+
+        # Re-initialize offloader
+        if self.sourcePath: # Only init if a source path was previously set or is still valid
+            self.initOffloader()
+        else:
+            # Reset related UI elements if no source path
+            self.sourceInfoLabel.setText('0 files, 0 MB')
+            self.sourceTitleLabel.setText('Press Browse')
+
+
+        # Update UI elements
+        self.updateSourceInfo()
+        self.updateDestInfo()
+        
+        # Stop timer if it's running (it should be stopped by finished() but good practice)
+        if hasattr(self, 'timer') and self.timer.running:
+            self.timer.running = False
+            self.timer.quit() # Properly stop the QThread
+            self.timer.wait() # Wait for thread to finish
 
     def updateTime(self, value):
         self.progressTime.setText(f"Approx. {utils.time_to_string(value)} left")
@@ -503,14 +904,31 @@ class MainWindow(QMainWindow):
         self.offloader._running = False
 
     def initOffloader(self):
+        active_preset_data = None
+        # Determine initial destination based on whether a preset is active
+        # self.destPath should already be correctly set by __init__ or applyPreset if UI loaded a preset
+        
+        initial_dest_for_offloader = self.destPath # self.destPath is now leading
+
+        if self.active_preset_name and self.active_preset_name != "None (Default Settings)":
+            active_preset_data = self.preset_manager.get_preset(self.active_preset_name)
+            if active_preset_data:
+                 # Ensure offloader uses the preset's target_location if different from current self.destPath
+                 # This should be redundant if applyPreset correctly set self.destPath
+                initial_dest_for_offloader = active_preset_data.get('target_location', self.destPath)
+
+        if not self.sourcePath:
+            logging.warning("Source path not set. Offloader not initialized.")
+            return
+
         self.offloader = Offloader(source=self.sourcePath,
-                                   dest=self.destPath,
-                                   structure=self.settings.structure,
-                                   filename=self.settings.filename,
-                                   prefix=self.settings.prefix,
+                                   dest=initial_dest_for_offloader, # Use the determined destination
+                                   # structure, filename, prefix will be taken from preset_settings if provided
+                                   # or fall back to general settings within Offloader.__init__
                                    mode='copy',
                                    dryrun=False,
-                                   log_level='debug')
+                                   log_level='debug',
+                                   preset_settings=active_preset_data) 
         self.offloader._progress_signal.connect(self.updateProgressBar)
         self.timer = Timer()
         self.timer._time_signal.connect(self.updateTime)
@@ -518,7 +936,10 @@ class MainWindow(QMainWindow):
         self.updateDestInfo()
 
     def updateSourceInfo(self):
-        self.sourceInfoLabel.setText(f'{self.offloader.source_files.count} files, {self.offloader.source_files.hsize}')
+        if self.offloader and self.offloader.source_files:
+            self.sourceInfoLabel.setText(f'{self.offloader.source_files.count} files, {self.offloader.source_files.hsize}')
+        else:
+            self.sourceInfoLabel.setText('0 files, 0 MB')
 
     def updateDestInfo(self):
         try:
@@ -875,7 +1296,7 @@ class MainWindow(QMainWindow):
             except Exception as e2:
                 logging.error(f"UPDATE_DEST_DIAG: Critical error setting destPathLabel fallback text: {e2}")
             logging.shutdown()
-
+        
         try:
             self.updateDestInfo() # Call the now robust updateDestInfo
             logging.info("UPDATE_DEST_DIAG: updateDestInfo() called.")
@@ -891,14 +1312,10 @@ class MainWindow(QMainWindow):
 
         # Save to settings
         try:
-            if self.destPath: # Only save if destPath is not None
-                # Use the property setter for latest_destination, which handles resolve() and writing to JSON
-                # self.destPath here could be a string (if from settings initially, or if browseDest returned string that wasn't converted)
-                # or a Path object (if browseDest converted it to Path for self.destPath, or if it was a default local Path).
-                # The latest_destination setter expects a path string or Path convertible to string.
+            if self.destPath: 
                 logging.info(f"UPDATE_DEST_DIAG: Attempting to save to settings.latest_destination with value: '{self.destPath}' (type: {type(self.destPath)})")
                 logging.shutdown()
-                self.settings.latest_destination = str(self.destPath) # Ensure it's a string for the setter
+                self.settings.latest_destination = str(self.destPath) 
                 logging.info(f'UPDATE_DEST_DIAG: Destination successfully saved to settings.latest_destination.')
                 logging.shutdown()
             else:
@@ -907,6 +1324,90 @@ class MainWindow(QMainWindow):
         except Exception as e_save:
             logging.error(f"UPDATE_DEST_DIAG: Error saving destination to settings.latest_destination: {e_save}", exc_info=True)
             logging.shutdown()
+
+        self._check_and_update_preset_modified_status() # Call added here
+
+    def _get_current_settings_for_comparison(self):
+        # Ensure self.destPath is string for comparison, handling None
+        current_dest_path_str = str(self.destPath) if self.destPath is not None else None
+        
+        # If a preset is loaded, use its original file_types for comparison,
+        # otherwise, this won't be used for comparison if no preset is active.
+        compare_file_types = []
+        if self.loaded_preset_settings_snapshot:
+            compare_file_types = self.loaded_preset_settings_snapshot.get('file_types', [])
+
+        return {
+            'target_location': current_dest_path_str,
+            'folder_structure': self.settings.structure,
+            'filename_prefix': self.settings.prefix,
+            'filename_preset': self.settings.filename,
+            'file_types': compare_file_types # Only compare if a snapshot exists
+        }
+
+    def _check_and_update_preset_modified_status(self):
+        if not self.active_preset_name or not self.loaded_preset_settings_snapshot:
+            self.preset_is_modified = False
+            self._update_preset_display_in_combobox()
+            return
+
+        current_settings_for_comp = self._get_current_settings_for_comparison()
+        
+        # Compare only the relevant fields, target_location needs careful handling for Path vs str
+        snapshot_target_location = self.loaded_preset_settings_snapshot.get('target_location')
+        current_target_location = current_settings_for_comp.get('target_location')
+
+        modified = False
+        if str(snapshot_target_location) != str(current_target_location): # Compare as strings
+            modified = True
+        if self.loaded_preset_settings_snapshot.get('folder_structure') != current_settings_for_comp.get('folder_structure'):
+            modified = True
+        if self.loaded_preset_settings_snapshot.get('filename_prefix') != current_settings_for_comp.get('filename_prefix'):
+            modified = True
+        if self.loaded_preset_settings_snapshot.get('filename_preset') != current_settings_for_comp.get('filename_preset'):
+            modified = True
+        # Not comparing 'file_types' here as they are not changed by SettingsDialog or browseDest
+
+        if self.preset_is_modified != modified:
+            self.preset_is_modified = modified
+            self._update_preset_display_in_combobox()
+        elif self.active_preset_name: # Always refresh display if a preset is active, in case its name itself changed elsewhere
+             self._update_preset_display_in_combobox()
+
+
+    def _update_preset_display_in_combobox(self):
+        if not self.active_preset_name:
+            # If no preset is active, ensure "None (Default Settings)" is not marked as edited.
+            # Or handle if self.presetComboBox can be at an index that is not "None" but active_preset_name is None
+            idx = self.presetComboBox.findText("None (Default Settings)")
+            if idx != -1 and self.presetComboBox.itemText(idx).endswith(" (edited)"):
+                 self.presetComboBox.setItemText(idx, "None (Default Settings)")
+            return
+
+        base_name = self.active_preset_name # Base name is stored here
+        display_text = base_name
+        if self.preset_is_modified:
+            display_text = f"{base_name} (edited)"
+
+        # Find the item by its base name to update its text
+        # This is tricky because populatePresetsComboBox clears and adds items.
+        # We need to iterate and find, not rely on index if list can change.
+        for i in range(self.presetComboBox.count()):
+            item_text = self.presetComboBox.itemText(i)
+            # Check against base name or base name + " (edited)"
+            current_base_name = item_text.replace(" (edited)", "")
+            if current_base_name == base_name:
+                if self.presetComboBox.itemText(i) != display_text:
+                    self.presetComboBox.setItemText(i, display_text)
+                # After updating, if this is the current selection, ensure it reflects
+                if self.presetComboBox.currentIndex() == i :
+                     # This might be redundant if currentIndex change signal handles it, but safe
+                     pass
+                break 
+        # If the active preset was deleted and re-added, or if this is called after populate,
+        # it might not find it if the list was just rebuilt.
+        # applyPreset will call this after it sets active_preset_name and populates.
+
 
     def pathLabel(self, path):
         text = path

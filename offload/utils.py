@@ -58,15 +58,17 @@ class Preset:
 
 
 class FileList:
-    def __init__(self, path, exclude=None):
+    def __init__(self, path, exclude=None, allowed_extensions=None):
         """A list of files as File objects
 
         Args:
             path: path to the root directory to scan for files
             exclude: list of filenames to ignore when adding files to list
+            allowed_extensions: list of lowercase file extensions to include (e.g., ['.jpg', '.mp4']). If None or empty, all files are included.
         """
         self._path = Path(path)
         self.files = []
+        self.allowed_extensions = allowed_extensions
 
         self.exclude = []
         if isinstance(exclude, list):
@@ -84,14 +86,26 @@ class FileList:
     def update(self):
         """Get list of files in a folder and its subfolders"""
         # Get all files in path
-        files = [x for x in self._path.rglob("*") if x.is_file() and x.name not in self.exclude]
-        logging.debug(f"All files in source: {files}")
+        all_files = [x for x in self._path.rglob("*") if x.is_file() and x.name not in self.exclude]
+        
+        # Filter by allowed_extensions if provided
+        if self.allowed_extensions:
+            filtered_files = []
+            for f in all_files:
+                if f.suffix.lower() in self.allowed_extensions:
+                    filtered_files.append(f)
+            logging.debug(f"Files after extension filtering: {filtered_files}")
+            files_to_process = filtered_files
+        else:
+            files_to_process = all_files
+            logging.debug(f"No extension filtering. All files in source: {files_to_process}")
 
         # Create a dict with all files that aren't in exclude list
-        for n, f in enumerate(files):
+        self.files = [] # Clear previous files
+        for n, f in enumerate(files_to_process):
             logging.debug(f.name)
             self.files.append(File(f))
-            logging.debug(f"Added {f.name} to file list ({n + 1}/{len(files)})")
+            logging.debug(f"Added {f.name} to file list ({n + 1}/{len(files_to_process)})")
 
     @property
     def size(self) -> int:
@@ -110,6 +124,8 @@ class FileList:
     @property
     def avg_file_size(self) -> int:
         """Return average file size of files in list"""
+        if self.count == 0:
+            return 0
         return int(self.size / self.count)
 
 
@@ -254,11 +270,19 @@ class File:
 
     @property
     def exifdata(self) -> dict:
-        """Get the file exifdata using exiftool"""
+        """Get the file exifdata using Pillow for images, or exiftool as a fallback."""
         if self.is_file:
-            return exifdata(self.path)
-        elif self._path.is_file():
-            return exifdata(self._path)
+            # Try Pillow first for images
+            data = exifdata(self.path) # This function already calls is_image_file
+            if data: # If Pillow returned data (i.e., it's an image and had EXIF)
+                return data
+            # If Pillow returned no data, try exiftool (for videos or images Pillow couldn't read)
+            return file_metadata(self.path)
+        elif self._path.is_file(): # Fallback for the original _path if self.path isn't set/valid yet
+            data = exifdata(self._path)
+            if data:
+                return data
+            return file_metadata(self._path)
         return {}
 
     @property
@@ -602,6 +626,75 @@ class Settings:
     def filename(self, preset: str):
         """Set prefix preset"""
         self._write_settings(filename=preset)
+
+
+class PresetManager:
+    def __init__(self):
+        self._presets_file = APP_DATA_PATH / 'presets.json'
+        self._presets = {}
+        self._load_presets()
+
+    def _load_presets(self):
+        if not self._presets_file.is_file():
+            self._presets = {}
+            self._save_presets() # Create an empty file if it doesn't exist
+        else:
+            try:
+                with self._presets_file.open('r') as f:
+                    self._presets = json.load(f)
+            except json.JSONDecodeError:
+                logging.error(f"Error decoding presets file: {self._presets_file}. Initializing with empty presets.")
+                self._presets = {} # Initialize with empty if file is corrupt
+
+    def _save_presets(self):
+        try:
+            with self._presets_file.open('w') as f:
+                json.dump(self._presets, f, indent=4)
+        except IOError as e:
+            logging.error(f"Could not write presets to {self._presets_file}: {e}")
+
+    def get_preset(self, name: str):
+        return self._presets.get(name)
+
+    def get_all_presets(self) -> dict:
+        return self._presets.copy() # Return a copy to prevent direct modification
+
+    def add_or_update_preset(self, name: str, settings: dict):
+        '''Adds a new preset or updates an existing one.
+        
+        Args:
+            name: The name of the preset.
+            settings: A dictionary containing:
+                - target_location (str)
+                - folder_structure (str)
+                - filename_prefix (str)
+                - filename_preset (str)
+                - file_types (list of str, e.g., [".jpg", ".mp4"])
+        '''
+        required_keys = ['target_location', 'folder_structure', 'filename_prefix', 'filename_preset', 'file_types']
+        if not all(key in settings for key in required_keys):
+            logging.error(f"Preset '{name}' is missing one or more required settings: {required_keys}")
+            return False
+        if not isinstance(settings.get('file_types'), list):
+            logging.error(f"Preset '{name}' has invalid 'file_types'. It should be a list of strings.")
+            return False
+            
+        self._presets[name] = settings
+        self._save_presets()
+        logging.info(f"Preset '{name}' added/updated.")
+        return True
+
+    def delete_preset(self, name: str):
+        if name in self._presets:
+            del self._presets[name]
+            self._save_presets()
+            logging.info(f"Preset '{name}' deleted.")
+            return True
+        logging.warning(f"Preset '{name}' not found for deletion.")
+        return False
+
+    def get_preset_names(self) -> list:
+        return list(self._presets.keys())
 
 
 def setup_logger(level="info"):

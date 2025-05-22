@@ -16,7 +16,7 @@ from pathlib import Path
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from offload import APP_DATA_PATH, REPORTS_PATH, EXCLUDE_FILES, utils
-from offload.utils import FileList, File, Settings
+from offload.utils import FileList, File, Settings, PresetManager
 
 
 class Offloader(QThread):
@@ -28,28 +28,38 @@ class Offloader(QThread):
                  filename=None,
                  prefix=None,
                  dryrun=False,
-                 log_level='info'):
+                 log_level='info',
+                 preset_settings: dict = None):
         super(Offloader, self).__init__()
         self.settings = Settings()
         self._logger = utils.setup_logger(log_level)
         self._today = datetime.now()
         self._source = Path(source)
-        self._destination = Path(dest)
-        # Default to settings if not given
-        if structure:
-            self._structure = structure
+        
+        # Apply preset settings if provided, otherwise use general settings or defaults
+        if preset_settings:
+            self._destination = Path(preset_settings.get('target_location', dest))
+            self._structure = preset_settings.get('folder_structure', structure if structure else self.settings.structure)
+            self._filename = preset_settings.get('filename_preset', filename if filename else self.settings.filename)
+            self._prefix = preset_settings.get('filename_prefix', prefix if prefix else self.settings.prefix)
+            allowed_extensions = preset_settings.get('file_types') 
         else:
-            self._structure = self.settings.structure
+            self._destination = Path(dest)
+            if structure:
+                self._structure = structure
+            else:
+                self._structure = self.settings.structure
 
-        if filename:
-            self._filename = filename
-        else:
-            self._filename = self.settings.filename
+            if filename:
+                self._filename = filename
+            else:
+                self._filename = self.settings.filename
 
-        if prefix:
-            self._prefix = prefix
-        else:
-            self._prefix = self.settings.prefix
+            if prefix:
+                self._prefix = prefix
+            else:
+                self._prefix = self.settings.prefix
+            allowed_extensions = None # No preset, so no specific file_types initially
 
         self._mode = mode
         self._dryrun = dryrun
@@ -59,7 +69,8 @@ class Offloader(QThread):
 
         # Properties
         logging.info("Getting list of files")
-        self.source_files = FileList(self._source, exclude=self._exclude)
+        # Pass allowed_extensions to FileList
+        self.source_files = FileList(self._source, exclude=self._exclude, allowed_extensions=allowed_extensions)
         self.source_files.sort()
 
         # Offload attributes
@@ -75,16 +86,36 @@ class Offloader(QThread):
         # Report
         self.report = Report()
 
-    def update_from_settings(self):
-        """Update structure, filename and prefix from settings"""
-        self._structure = self.settings.structure
+    def update_from_settings(self, preset_settings: dict = None):
+        """Update structure, filename and prefix from settings or a preset"""
+        if preset_settings:
+            self._destination = Path(preset_settings.get('target_location', self._destination)) # Keep current dest if not in preset
+            self._structure = preset_settings.get('folder_structure', self.settings.structure)
+            self._filename = preset_settings.get('filename_preset', self.settings.filename)
+            self._prefix = preset_settings.get('filename_prefix', self.settings.prefix)
+            allowed_extensions = preset_settings.get('file_types')
+            # Re-initialize FileList with new file_types if they changed
+            # We should only re-scan if source or allowed_extensions change.
+            # For now, let's assume source is fixed after initOffloader, and only extensions might change with preset.
+            if self.source_files.allowed_extensions != allowed_extensions:
+                 self.source_files = FileList(self._source, exclude=self._exclude, allowed_extensions=allowed_extensions)
+                 self.source_files.sort()
+            logging.debug(f"Offloader updated from preset: {preset_settings.get('name', 'Unnamed Preset')}")
+
+        else: # Fallback to general settings if no preset
+            self._structure = self.settings.structure
+            self._filename = self.settings.filename
+            self._prefix = self.settings.prefix
+            # If we were on a preset and now go to no preset, reset file_types filter
+            if self.source_files.allowed_extensions is not None:
+                 self.source_files = FileList(self._source, exclude=self._exclude, allowed_extensions=None)
+                 self.source_files.sort()
+            logging.debug(f"Offloader updated from general settings.")
+
         logging.debug(f'Folder structure preset is {self._structure}')
-
-        self._filename = self.settings.filename
         logging.debug(f'Filename preset is {self._filename}')
-
-        self._prefix = self.settings.prefix
         logging.debug(f'Filename prefix preset is {self._prefix}')
+        logging.debug(f'Allowed extensions are {self.source_files.allowed_extensions}')
 
     @property
     def source(self):
@@ -93,10 +124,12 @@ class Offloader(QThread):
 
     @source.setter
     def source(self, path):
-        """Set the source directory"""
+        """Set the source directory and update FileList, respecting current preset's file_types"""
         if Path(path).is_dir():
             self._source = Path(path)
-            self.source_files = FileList(self._source, exclude=self._exclude)
+            current_allowed_extensions = self.source_files.allowed_extensions if hasattr(self, 'source_files') and self.source_files else None
+            self.source_files = FileList(self._source, exclude=self._exclude, allowed_extensions=current_allowed_extensions)
+            self.source_files.sort() # Sort after updating
         else:
             logging.error(f'{path} is not a valid directory')
 
