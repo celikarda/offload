@@ -298,8 +298,9 @@ class Offloader(QThread):
                             self._progress_signal.emit(self._signal)
                             if not self._running: raise InterruptedError("Offload cancelled during copy prep")
 
-                            # Copy file
-                            utils.pathlib_copy(source_file.path, dest_file.path)
+                            # Copy file and reuse the source checksum from the copy read.
+                            source_checksum = utils.pathlib_copy(source_file.path, dest_file.path)
+                            source_file.checksum = source_checksum
                             if not self._running: raise InterruptedError("Offload cancelled during copy")
 
                             # Send signal to GUI
@@ -311,14 +312,19 @@ class Offloader(QThread):
                             logging.info("Verifying transferred file")
 
                             # File transfer successful
-                            if utils.compare_checksums(source_file.checksum, dest_file.checksum):
+                            destination_checksum = dest_file.checksum
+                            if utils.compare_checksums(source_checksum, destination_checksum):
                                 logging.info("File transferred successfully")
-                                self.report.write(source_file, dest_file, 'Successful')
+                                self.report.write(source_file, dest_file, 'Successful',
+                                                  source_checksum=source_checksum,
+                                                  destination_checksum=destination_checksum)
                                 if self._mode == "move":
                                     source_file.delete()
                             else:
                                 logging.error("File NOT transferred successfully, mismatching checksums")
-                                self.report.write(source_file, dest_file, 'Failed (Checksum)')
+                                self.report.write(source_file, dest_file, 'Failed (Checksum)',
+                                                  source_checksum=source_checksum,
+                                                  destination_checksum=destination_checksum)
                                 self.errored_files.append({str(source_file.path): "Mismatching checksum after transfer"})
                         
                         except (PermissionError, IOError, OSError) as e:
@@ -465,12 +471,17 @@ class Report:
         self.html_path.write_text(html_report)
         return self.html_path
 
-    def write(self, source: File, destination: File, status, checksum=True):
+    def write(self, source: File, destination: File, status, checksum=True,
+              source_checksum=None, destination_checksum=None):
         with self.path.open('a') as report:
             writer = csv.writer(report, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
             if checksum:
+                if source_checksum is None:
+                    source_checksum = source.checksum
+                if destination_checksum is None:
+                    destination_checksum = destination.checksum
                 columns = [source.filename, destination.filename, status,
-                           source.checksum, destination.checksum,
+                           source_checksum, destination_checksum,
                            source.path, destination.path, utils.convert_size(source.size), source.mdate]
             else:
                 columns = [source.filename, destination.filename, status,

@@ -342,6 +342,8 @@ class MainWindow(QMainWindow):
             logging.critical(f"INIT_UI_DIAG: CRITICAL - Error logging self.destPath post-call: {e_log_init}", exc_info=True)
 
         self.destSize = 0
+        self._last_dest_info_update = 0
+        self._dest_info_refresh_interval = 30
         self.iconSize = 48
         self.colors = COLORS
         self.styles = STYLES
@@ -475,7 +477,7 @@ class MainWindow(QMainWindow):
         mainPathsLayout.addWidget(self.destPathLabel)
         try:
             logging.info("INIT_UI_DIAG: Calling self.updateDestInfo()...")
-            self.updateDestInfo()
+            self.updateDestInfo(force=True)
             logging.info("INIT_UI_DIAG: self.updateDestInfo() returned.")
         except Exception as e_upd_dest_info:
             logging.critical(f"INIT_UI_DIAG: CRITICAL - Error calling self.updateDestInfo(): {e_upd_dest_info}")
@@ -652,7 +654,7 @@ class MainWindow(QMainWindow):
                 self.destTitleLabel.setText("N/A")
 
             logging.debug("APPLYPRESET_COMMON_UI: Calling updateDestInfo().")
-            self.updateDestInfo()
+            self.updateDestInfo(force=True)
             logging.debug("APPLYPRESET_COMMON_UI: updateDestInfo() called.")
             
             if self.offloader:
@@ -780,7 +782,7 @@ class MainWindow(QMainWindow):
 
         # Update UI elements
         self.updateSourceInfo()
-        self.updateDestInfo()
+        self.updateDestInfo(force=True)
         
         # Stop timer if it's running (it should be stopped by finished() but good practice)
         if hasattr(self, 'timer') and self.timer.running:
@@ -834,7 +836,7 @@ class MainWindow(QMainWindow):
         self.timer = Timer()
         self.timer._time_signal.connect(self.updateTime)
         self.updateSourceInfo()
-        self.updateDestInfo()
+        self.updateDestInfo(force=True)
 
     def updateSourceInfo(self):
         if self.offloader and self.offloader.source_files:
@@ -842,8 +844,13 @@ class MainWindow(QMainWindow):
         else:
             self.sourceInfoLabel.setText('0 files, 0 MB')
 
-    def updateDestInfo(self):
+    def updateDestInfo(self, force=False):
         try:
+            now = time.time()
+            if not force and now - self._last_dest_info_update < self._dest_info_refresh_interval:
+                return
+            self._last_dest_info_update = now
+
             if self.destPath:
                 # Ensure utils.disk_usage is called, which is now robust
                 usage = utils.disk_usage(self.destPath, human=True) 
@@ -1135,7 +1142,7 @@ class MainWindow(QMainWindow):
                 logging.error(f"UPDATE_DEST_DIAG: Critical error setting destPathLabel fallback text: {e2}")
 
         try:
-            self.updateDestInfo() # Call the now robust updateDestInfo
+            self.updateDestInfo(force=True) # Call the now robust updateDestInfo
             logging.info("UPDATE_DEST_DIAG: updateDestInfo() called.")
         except Exception as e:
             logging.error(f"UPDATE_DEST_DIAG: Error calling updateDestInfo from updateDest: {e}", exc_info=True)

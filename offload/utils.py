@@ -81,6 +81,7 @@ class FileList:
         """
         self._path = Path(path)
         self.files = []
+        self._size = 0
         self.allowed_extensions = allowed_extensions
 
         self.exclude = []
@@ -98,32 +99,26 @@ class FileList:
 
     def update(self):
         """Get list of files in a folder and its subfolders"""
-        # Get all files in path
-        all_files = [x for x in self._path.rglob("*") if x.is_file() and x.name not in self.exclude]
-        
-        # Filter by allowed_extensions if provided
-        if self.allowed_extensions:
-            filtered_files = []
-            for f in all_files:
-                if f.suffix.lower() in self.allowed_extensions:
-                    filtered_files.append(f)
-            logging.debug(f"Files after extension filtering: {filtered_files}")
-            files_to_process = filtered_files
-        else:
-            files_to_process = all_files
-            logging.debug(f"No extension filtering. All files in source: {files_to_process}")
-
-        # Create a dict with all files that aren't in exclude list
         self.files = [] # Clear previous files
-        for n, f in enumerate(files_to_process):
-            logging.debug(f.name)
-            self.files.append(File(f))
-            logging.debug(f"Added {f.name} to file list ({n + 1}/{len(files_to_process)})")
+        self._size = 0
+        allowed_extensions = {x.lower() for x in self.allowed_extensions} if self.allowed_extensions else None
+
+        for f in self._path.rglob("*"):
+            if not f.is_file() or f.name in self.exclude:
+                continue
+            if allowed_extensions and f.suffix.lower() not in allowed_extensions:
+                continue
+
+            file_obj = File(f)
+            self.files.append(file_obj)
+            self._size += file_obj.size
+
+        logging.debug(f"Collected {len(self.files)} files from {self._path}")
 
     @property
     def size(self) -> int:
         """Return total file size of all files in list"""
-        return sum([x.size for x in self.files])
+        return self._size
 
     @property
     def hsize(self) -> str:
@@ -157,14 +152,50 @@ class File:
             logging.error(f'{path} is a folder')
             exit()
         # Setup attributes
-        self._checksum = ''
-        self._size = 0
+        self._checksum = None
+        self._checksum_signature = None
+        self._size = None
+        self._mtime = None
+        self._ctime = None
+        self._stat_signature = None
         self._prefix = prefix
         self._name = self._path.stem
         self.inc = 0
         self.inc_pad = incremental_padding
         self.ext = self._path.suffix.strip('.')
         self.relative_path = None
+
+    def _invalidate_file_cache(self):
+        self._checksum = None
+        self._checksum_signature = None
+        self._size = None
+        self._mtime = None
+        self._ctime = None
+        self._stat_signature = None
+
+    def _refresh_stat_cache(self):
+        path = self.path
+        if not path.is_file() and self._path.is_file():
+            path = self._path
+        if not path.is_file():
+            self._size = None
+            self._mtime = None
+            self._ctime = None
+            self._stat_signature = None
+            self._checksum = None
+            self._checksum_signature = None
+            return False
+
+        stat_result = path.stat()
+        stat_signature = (stat_result.st_size, stat_result.st_mtime_ns)
+        if self._stat_signature != stat_signature:
+            self._size = stat_result.st_size
+            self._mtime = stat_result.st_mtime
+            self._ctime = stat_result.st_ctime
+            self._stat_signature = stat_signature
+            if self._checksum_signature != stat_signature:
+                self._checksum = None
+        return True
 
     @property
     def is_file(self):
@@ -217,7 +248,9 @@ class File:
         if validate:
             new_name = validate_string(new_name)
 
-        self._name = new_name
+        if self._name != new_name:
+            self._name = new_name
+            self._invalidate_file_cache()
 
     @property
     def path(self):
@@ -232,6 +265,7 @@ class File:
             self._path = path.parent / self.filename
         else:
             self._path = path / self.filename
+        self._invalidate_file_cache()
 
     @property
     def checksum(self):
@@ -239,16 +273,23 @@ class File:
 
         Returns: file checksum
         """
-        if self.is_file:
+        if self._refresh_stat_cache() and (
+                self._checksum is None or self._checksum_signature != self._stat_signature):
             self._checksum = file_checksum(self.path)
+            self._checksum_signature = self._stat_signature
         return self._checksum
+
+    @checksum.setter
+    def checksum(self, value):
+        self._refresh_stat_cache()
+        self._checksum = value
+        self._checksum_signature = self._stat_signature
 
     @property
     def size(self) -> int:
         """Return the size of the file if it exists"""
-        if self.is_file:
-            self._size = self.path.stat().st_size
-        return self._size
+        self._refresh_stat_cache()
+        return self._size or 0
 
     @property
     def mdate(self):
@@ -258,26 +299,20 @@ class File:
     @property
     def mtime(self):
         """Modification time of the file"""
-        if self.is_file:
-            if self.path.stat().st_mtime:
-                return self.path.stat().st_mtime
+        self._refresh_stat_cache()
 
-        elif self._path.is_file():
-            if self._path.stat().st_mtime:
-                return self._path.stat().st_mtime
+        if self._mtime is not None:
+            return self._mtime
 
         return datetime.timestamp(datetime.now())
 
     @property
     def ctime(self):
         """Modification time of the file"""
-        if self.is_file:
-            if self.path.stat().st_ctime:
-                return self.path.stat().st_ctime
+        self._refresh_stat_cache()
 
-        elif self._path.is_file():
-            if self._path.stat().st_ctime:
-                return self._path.stat().st_ctime
+        if self._ctime is not None:
+            return self._ctime
 
         return datetime.timestamp(datetime.now())
 
@@ -340,6 +375,7 @@ class File:
                 self._prefix = self._prefix.format(date=date)
         else:
             self._prefix = prefix
+        self._invalidate_file_cache()
 
     @property
     def duration(self):
@@ -359,6 +395,7 @@ class File:
     def increment_filename(self):
         """Add incremental or count up"""
         self.inc += 1
+        self._invalidate_file_cache()
 
     def set_relative_path(self, relative_to):
         """Add/update the relative path property"""
@@ -885,14 +922,25 @@ def copy_file(source: Path, destination: Path):
     return True
 
 
-def pathlib_copy(source: Path, destination: Path, chunk_size=262144):
-    """Use pathlib to copy a file"""
-    if source.stat().st_size >= (1024 ** 2 * 64):
-        with source.open('rb') as src, destination.open('wb') as dest:
-            for chunk in iter(lambda: src.read(chunk_size), b''):
-                dest.write(chunk)
-    else:
-        destination.write_bytes(source.read_bytes())
+def pathlib_copy(source: Path, destination: Path, chunk_size=1024 * 1024):
+    """Copy a file and return the source xxhash from the copy read."""
+    if xxhash is None:
+        raise Exception("xxhash not available on this platform.  Try 'pip install xxhash'")
+
+    source = Path(source)
+    destination = Path(destination)
+    h = xxhash.xxh3_64()
+
+    with source.open('rb') as src, destination.open('wb') as dest:
+        for chunk in iter(lambda: src.read(chunk_size), b''):
+            h.update(chunk)
+            dest.write(chunk)
+
+    try:
+        shutil.copystat(source, destination)
+    except OSError as e:
+        logging.warning(f"Could not preserve file metadata for {destination}: {e}")
+    return h.hexdigest()
 
 
 def file_mod_date(file_path):
@@ -978,19 +1026,23 @@ def compare_file_size(a, b):
 
 
 def compare_files(a: File, b: File):
-    a_path = Path(a.path)
-    b_path = Path(b.path)
-    if a.size == b.size:
-        logging.info(f"Sizes match: {a.size} (source) | {b.size} (destination)")
-        logging.debug(f'ctime - {a.ctime} | {b.ctime}')
-        logging.debug(f'mtime - {a.mtime} | {b.mtime}')
-        if a.mtime == b.mtime:
-            logging.info(f"Modification times match: {a.mtime} (source) | {b.mtime} (destination)")
+    a_size = a.size
+    b_size = b.size
+    if a_size == b_size:
+        logging.info(f"Sizes match: {a_size} (source) | {b_size} (destination)")
+        a_ctime = a.ctime
+        b_ctime = b.ctime
+        a_mtime = a.mtime
+        b_mtime = b.mtime
+        logging.debug(f'ctime - {a_ctime} | {b_ctime}')
+        logging.debug(f'mtime - {a_mtime} | {b_mtime}')
+        if a_mtime == b_mtime:
+            logging.info(f"Modification times match: {a_mtime} (source) | {b_mtime} (destination)")
             return True
         else:
-            logging.info(f"Modification times mismatch: {a.mtime} (source) | {b.mtime} (destination)")
+            logging.info(f"Modification times mismatch: {a_mtime} (source) | {b_mtime} (destination)")
     else:
-        logging.info(f"Sizes mismatch: {a.size} (source) | {b.size} (destination)")
+        logging.info(f"Sizes mismatch: {a_size} (source) | {b_size} (destination)")
 
     if compare_checksums(a.checksum, b.checksum):
         return True
