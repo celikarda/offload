@@ -12,6 +12,7 @@ pyqt5 = "*"
 psutil = "*"
 pillow = "*"
 setuptools = "*"
+pyinstaller = "*"
 
 [requires]
 python_version = "3.9"

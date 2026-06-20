@@ -78,10 +78,10 @@ class Offloader(QThread):
         self.ol_bytes_transferred = 0
 
         # Set some variables
-        self.destination_folders = []
-        self.skipped_files = []
-        self.processed_files = []
         self.errored_files = []
+        self.skipped_files = []
+        self.destination_folders = []
+        self.processed_files = []
 
         # Report
         self.report = Report()
@@ -175,7 +175,7 @@ class Offloader(QThread):
 
     def offload(self):
         """Offload files"""
-        # Offload start time
+        self._running = True # Ensure running flag is true at start
         self.ol_time_started = time.time()
 
         # Get list of files in source folder
@@ -196,6 +196,26 @@ class Offloader(QThread):
             self._signal['action'] = f'Processing file {file_id + 1}/{len(self.source_files.files)}'
             self._signal['time'] = self.ol_time_remaining
             self._progress_signal.emit(self._signal)
+
+            # === ADDED DEFENSIVE CHECK ===
+            if source_file.filename is None:
+                error_msg = f"Internal error: Filename for '{source_file.path}' evaluated to None. Skipping this file."
+                logging.error(error_msg)
+                self.errored_files.append({str(source_file.path): "Filename evaluated to None"})
+                self._signal['is_file_error'] = True
+                self._signal['file_error_message'] = error_msg
+                self._progress_signal.emit(self._signal)
+                self._signal['is_file_error'] = False # Reset for next signal emission
+                # Also write to report
+                try:
+                    # Attempt to create a placeholder dest_file for reporting, it won't be used for copy
+                    placeholder_dest_path = self._destination / "SKIPPED_DUE_TO_NONE_FILENAME" / (source_file.path.name if source_file.path else "unknown_original_name")
+                    placeholder_dest_file_for_report = File(placeholder_dest_path)
+                    self.report.write(source_file, placeholder_dest_file_for_report, 'Failed (None Filename)', checksum=False)
+                except Exception as report_ex:
+                    logging.error(f"Error writing to report for None filename issue: {report_ex}")
+                continue # Skip to the next file
+            # === END ADDED DEFENSIVE CHECK ===
 
             # Create File object for destination file
             dest_folder = self._destination / utils.destination_folder(source_file.mdate, preset=self._structure)
@@ -267,45 +287,71 @@ class Offloader(QThread):
                 if source_file.path.is_file():
                     if self._dryrun:
                         logging.info("DRYRUN ENABLED, NOT PERFORMING FILE ACTIONS")
+                        self.report.write(source_file, dest_file, 'Dryrun (Skipped)', checksum=False)
                     else:
-                        # Create destination folder
-                        dest_file.path.parent.mkdir(exist_ok=True, parents=True)
+                        try:
+                            # Create destination folder
+                            dest_file.path.parent.mkdir(exist_ok=True, parents=True)
 
-                        # Send signal to GUI
-                        self._signal[
-                            'action'] = f'Processing file {file_id + 1}/{len(self.source_files.files)} [copying]'
-                        self._progress_signal.emit(self._signal)
+                            # Send signal to GUI
+                            self._signal['action'] = f'Processing file {file_id + 1}/{len(self.source_files.files)} [copying]'
+                            self._progress_signal.emit(self._signal)
+                            if not self._running: raise InterruptedError("Offload cancelled during copy prep")
 
-                        # Copy file
-                        utils.pathlib_copy(source_file.path, dest_file.path)
+                            # Copy file
+                            utils.pathlib_copy(source_file.path, dest_file.path)
+                            if not self._running: raise InterruptedError("Offload cancelled during copy")
 
-                        # Send signal to GUI
-                        self._signal[
-                            'action'] = f'Processing file {file_id + 1}/{len(self.source_files.files)} [verifying]'
-                        self._progress_signal.emit(self._signal)
+                            # Send signal to GUI
+                            self._signal['action'] = f'Processing file {file_id + 1}/{len(self.source_files.files)} [verifying]'
+                            self._progress_signal.emit(self._signal)
+                            if not self._running: raise InterruptedError("Offload cancelled during verify prep")
 
-                        # Verify file transfer
-                        logging.info("Verifying transferred file")
+                            # Verify file transfer
+                            logging.info("Verifying transferred file")
 
-                        # File transfer successful
-                        if utils.compare_checksums(source_file.checksum, dest_file.checksum):
-                            logging.info("File transferred successfully")
+                            # File transfer successful
+                            if utils.compare_checksums(source_file.checksum, dest_file.checksum):
+                                logging.info("File transferred successfully")
+                                self.report.write(source_file, dest_file, 'Successful')
+                                if self._mode == "move":
+                                    source_file.delete()
+                            else:
+                                logging.error("File NOT transferred successfully, mismatching checksums")
+                                self.report.write(source_file, dest_file, 'Failed (Checksum)')
+                                self.errored_files.append({str(source_file.path): "Mismatching checksum after transfer"})
+                        
+                        except (PermissionError, IOError, OSError) as e:
+                            error_msg = f"Error processing {source_file.filename}: {type(e).__name__} - {e}"
+                            logging.error(error_msg)
+                            self.report.write(source_file, dest_file, f'Failed ({type(e).__name__})', checksum=False)
+                            self.errored_files.append({str(source_file.path): str(e)})
+                            self._signal['is_file_error'] = True
+                            self._signal['file_error_message'] = error_msg
+                            self._progress_signal.emit(self._signal)
+                            self._signal['is_file_error'] = False # Reset for next signal
+                            # Continue to next file, file size will still be added to ol_bytes_transferred for progress calc
 
-                            # Write to report
-                            self.report.write(source_file, dest_file, 'Successful')
+                        except InterruptedError: # Custom error for cancellation
+                            logging.warning("Offload operation was cancelled by user during file operation.")
+                            self.report.write(source_file, dest_file, 'Cancelled', checksum=False)
+                            # No need to emit specific error signal, main loop will break
+                            break # Break from the for loop over files
 
-                            # Delete source file
-                            if self._mode == "move":
-                                source_file.delete()
+                        except Exception as e: # Catch any other unexpected error during file processing
+                            error_msg = f"Unexpected error processing {source_file.filename}: {type(e).__name__} - {e}"
+                            logging.critical(error_msg, exc_info=True)
+                            self.report.write(source_file, dest_file, f'Failed (Unexpected {type(e).__name__})', checksum=False)
+                            self.errored_files.append({str(source_file.path): str(e)})
+                            self._signal['is_file_error'] = True # Treat as a file error for now
+                            self._signal['file_error_message'] = error_msg
+                            self._progress_signal.emit(self._signal)
+                            self._signal['is_file_error'] = False # Reset for next signal
+                            # Depending on severity, you might choose to break or set a fatal error flag here
 
-                        # File transfer unsuccessful
-                        else:
-                            logging.error("File NOT transferred successfully, mismatching checksums")
-
-                            # Write to report
-                            self.report.write(source_file, dest_file, 'Failed')
-
-                            self.errored_files.append({source_file.path: "Mismatching checksum after transfer"})
+            if not self._running: # Check if cancelled after a file operation or skip
+                logging.info("Offload cancelled, exiting file loop.")
+                break
 
             # Add file size to total
             self.ol_bytes_transferred += source_file.size
@@ -346,12 +392,22 @@ class Offloader(QThread):
         self.report.write_html()
         self._signal['time'] = 0
         self._signal['is_finished'] = True
+        self._signal['is_fatal_error'] = False # Ensure it's reset or set if needed
+        self._signal['fatal_error_message'] = ""
         self._progress_signal.emit(self._signal)
         return True
 
     def run(self):
-        logging.info('Hello')
-        self.offload()
+        logging.info('Offloader thread started.')
+        try:
+            self.offload()
+        except Exception as e: # Catch-all for errors within the offload() call itself
+            logging.critical(f"Fatal error in Offloader.run: {e}", exc_info=True)
+            self._signal['is_finished'] = True # Mark as finished to stop UI waiting
+            self._signal['is_fatal_error'] = True
+            self._signal['fatal_error_message'] = f"A critical error occurred: {e}. Please check logs."
+            self._progress_signal.emit(self._signal)
+        logging.info('Offloader thread finished.')
 
 
 class Report:

@@ -90,12 +90,57 @@ QComboBox::down-arrow {{
     color: {COLORS['white']};
 }}
 
-#source-path, #dest-path, a{{
+#source-path, #dest-path {{
+    color: {COLORS['white']};
+}}
+
+a {{ /* Generic anchor tags, if used, remain primary color */
     color: {COLORS['primary']};
 }}
 
 #arrow {{
     font-size: 24px;
     color: {COLORS['white']};
+}}
+
+#PresetComboBoxMid {{
+    background: {COLORS['bg']};
+    color: {COLORS['primary']}; /* Yellow text */
+    border: 1px solid {COLORS['primary']}; /* Optional: yellow border for definition */
+    border-radius: 16px;
+    padding: 6px 12px; /* Adjusted padding */
+    font-weight: 400;
+}}
+
+#PresetComboBoxMid::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    border: 0;
+    /* The SVG arrow from the general QComboBox style should still apply unless overridden here */
+}}
+
+#PresetComboBoxMid::item {{
+    background: {COLORS['bg']};
+    color: {COLORS['primary']}; /* Yellow text for items */
+}}
+
+#PresetComboBoxMid::item:selected {{
+    background: {COLORS['primary']}; /* Yellow background for selected item */
+    color: {COLORS['bg']}; /* Dark text for selected item for contrast */
+}}
+
+#ManageSettingsTextButton {{
+    color: {COLORS['primary']}; /* Changed to yellow */
+    font-size: 12px;
+    font-weight: 300; /* Lighter than bold */
+    background: none;
+    border: none;
+    padding: 2px 5px;
+    margin-top: 5px; /* Add some space above it */
+    border-radius: 0; /* Override default button radius */
+}}
+
+#ManageSettingsTextButton:hover {{
+    color: {COLORS['bright-orange']}; /* Changed to bright-orange for consistency */
 }}
 """

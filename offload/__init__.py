@@ -1,18 +1,19 @@
 import sys
 import os
-import shutil
+# import shutil # No longer needed here
 from pathlib import Path
 
-print('')
-print(os.getcwd())
-print('')
+# print('') # REMOVED
+# print(os.getcwd()) # REMOVED
+# print('') # REMOVED
 
 if sys.platform == 'darwin':
     APP_DATA_PATH = Path().home() / 'Library/Application Support/Offload'
-elif sys.platform == 'win64':
-    APP_DATA_PATH = Path().home() / 'AppData\Local\Offload'
-else:
-    APP_DATA_PATH = Path(__file__).parent
+elif sys.platform == 'win32': # Corrected to win32 for broader Windows compatibility
+    APP_DATA_PATH = Path().home() / 'AppData' / 'Local' / 'Offload' # Used Path concatenation
+else: # For other OS (e.g. Linux)
+    APP_DATA_PATH = Path().home() / '.config' / 'Offload' # A common Linux pattern
+
 REPORTS_PATH = APP_DATA_PATH / 'reports'
 LOGS_PATH = APP_DATA_PATH / 'logs'
 VERSION = '0.1.2b0'
@@ -113,6 +114,7 @@ EXCLUDE_FILES = ["MEDIAPRO.XML",
                  "store_generation.\r",
                  ".Spotlight-V100"]
 
-_script_data = Path(os.getcwd()) / 'data'
-_script_data.mkdir(parents=True, exist_ok=True)
-shutil.copytree(_script_data, APP_DATA_PATH / 'data', dirs_exist_ok=True)
+# REMOVED the following problematic block:
+# _script_data = Path(os.getcwd()) / 'data'
+# _script_data.mkdir(parents=True, exist_ok=True)
+# shutil.copytree(_script_data, APP_DATA_PATH / 'data', dirs_exist_ok=True)

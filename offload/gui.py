@@ -4,7 +4,7 @@ import sys
 import psutil
 import logging
 from datetime import datetime
-from PyQt5.QtWidgets import QApplication, QWidget, QDialog, QMainWindow
+from PyQt5.QtWidgets import QApplication, QWidget, QDialog, QMainWindow, QMessageBox
 from PyQt5.QtWidgets import QLineEdit, QPushButton, QLabel, QFileDialog, QProgressBar, QComboBox, QListWidget
 from PyQt5.QtWidgets import QSpacerItem, QSizePolicy, QFrame, QFormLayout, QHBoxLayout, QVBoxLayout
 from PyQt5.QtWidgets import QStyle
@@ -51,164 +51,6 @@ class Timer(QThread):
             time.sleep(1)
             if not self.running:
                 break
-
-
-class SettingsDialog(QDialog):
-    def __init__(self):
-        super(SettingsDialog, self).__init__()
-        self.settings = Settings()
-        self.example_file = File('IMG_01337.RAW')
-        self.initUI()
-        # Show UI
-        # self.show()
-
-    def initUI(self):
-        self.resize(640, 260)
-        fontDB = QFontDatabase()
-        fontDB.addApplicationFont(str(Path(__file__).parent / 'data' / 'fonts' / 'SourceSans3-Regular.otf'))
-        fontDB.addApplicationFont(str(Path(__file__).parent / 'data' / 'fonts' / 'SourceSans3-Bold.otf'))
-        fontDB.addApplicationFont(str(Path(__file__).parent / 'data' / 'fonts' / 'SourceSans3-Light.otf'))
-        font = QFont('Source Sans 3')
-        font.setStyleStrategy(QFont.PreferAntialias)
-        self.setFont(font)
-
-        # mainLayout = QVBoxLayout()
-        mainLayout = QGridLayout()
-        self.destinationLine = QLineEdit(str(self.settings.default_destination))
-        self.destinationLine.textChanged.connect(self.defaultDestinationChange)
-        # mainLayout.addWidget(QLabel('Default Destination:'), 0, 0, 1, 1)
-        # mainLayout.addWidget(self.destinationLine, 0, 1, 1, 2)
-
-        # Structure presets
-        self.structureCombo = QComboBox()
-        self.structureOptions = {0: 'original',
-                                 1: 'taken_date',
-                                 2: 'year_month',
-                                 3: 'year',
-                                 4: 'flat'}
-        self.structureCombo.addItem('Keep original')
-        self.structureCombo.addItem('YYYY/YYYY-MM-DD')
-        self.structureCombo.addItem('YYYY/MM')
-        self.structureCombo.addItem('YYYY')
-        self.structureCombo.addItem('Flat')
-
-        # Set current item from settings
-        currentStructure = list(self.structureOptions.values()).index(self.settings.structure)
-        self.structureCombo.setCurrentIndex(currentStructure)
-        # Add to layout and add an action
-        self.structureCombo.currentIndexChanged.connect(self.folderStructureChange)
-        mainLayout.addWidget(QLabel('Folder Structure:'), 1, 0, 1, 1)
-        mainLayout.addWidget(self.structureCombo, 1, 1, 1, 2)
-
-        # Prefix presets
-        self.prefixCombo = QComboBox()
-        self.prefixOptions = {0: 'empty',
-                              1: 'taken_date',
-                              2: 'taken_date_time'}
-        self.prefixCombo.addItem('No prefix')
-        self.prefixCombo.addItem('YYMMDD')
-        self.prefixCombo.addItem('YYMMDD_hhmmss')
-        # Set current item from settings
-        currentPrefix = list(self.prefixOptions.values()).index(self.settings.prefix)
-        self.prefixCombo.setCurrentIndex(currentPrefix)
-        # Connect action
-        self.prefixCombo.currentIndexChanged.connect(self.prefixChange)
-        # Add to layout
-        mainLayout.addWidget(QLabel('Filename prefix:'), 2, 0, 1, 1)
-        mainLayout.addWidget(self.prefixCombo, 2, 1, 1, 2)
-
-        # Filename presets
-        self.filenameCombo = QComboBox()
-        self.filenameOptions = {0: None,
-                                1: 'camera_make',
-                                2: 'camera_model'}
-        self.filenameCombo.addItem('Keep original')
-        self.filenameCombo.addItem('Camera brand')
-        self.filenameCombo.addItem('Camera model')
-        # Set current item from settings
-        if self.settings.filename != 'None':
-            currentFilename = list(self.filenameOptions.values()).index(self.settings.filename)
-        else:
-            currentFilename = 0
-        self.filenameCombo.setCurrentIndex(currentFilename)
-
-        # Connect action
-        self.filenameCombo.currentIndexChanged.connect(self.filenameChange)
-        # Add to layout
-        mainLayout.addWidget(QLabel('Filename:'), 3, 0, 1, 1)
-        mainLayout.addWidget(self.filenameCombo, 3, 1, 1, 2)
-
-        # Filename presets
-        self.exampleLabel = QLabel('/Volumes/mcdaddy/media/photos/2021/2021-02-28/210228_IMG_01337.dng')
-        self.updateExampleLabel()
-        # Add to layout
-        mainLayout.addWidget(QLabel('Example:'), 4, 0, 1, 3)
-        mainLayout.addWidget(self.exampleLabel, 5, 0, 1, 3)
-
-        # Close button
-        self.closeButton = QPushButton('Close')
-        self.closeButton.clicked.connect(self.close)
-        mainLayout.addWidget(self.closeButton, 6, 0, 1, 3)
-
-        # Font
-        fontDB = QFontDatabase()
-        fontDB.addApplicationFont(str(Path(__file__).parent / 'data' / 'fonts' / 'SourceSans3-Regular.otf'))
-        fontDB.addApplicationFont(str(Path(__file__).parent / 'data' / 'fonts' / 'SourceSans3-Bold.otf'))
-        fontDB.addApplicationFont(str(Path(__file__).parent / 'data' / 'fonts' / 'SourceSans3-Light.otf'))
-        font = QFont('Source Sans 3')
-        font.setStyleStrategy(QFont.PreferAntialias)
-        self.setFont(font)
-
-        # Styling
-        self.colors = COLORS
-        self.styles = STYLES
-        self.setStyleSheet(self.styles)
-
-        self.setLayout(mainLayout)
-
-    def updateExampleLabel(self):
-        """Update the example label to be correct with the new settings"""
-        label = ''
-        path = Path('/Volumes/Storage/Pictures/IMG_01337.dng')
-        prefix = utils.Preset.prefix(self.settings.prefix)
-        structure = utils.Preset.structure(self.settings.structure)
-        filename = path.name
-        label = f'{path.parent}'
-
-        if structure:
-            subdir = f'{structure.format(date=datetime.now())}'
-            label = f'{label}/{subdir}'
-
-        if self.settings.filename == 'camera_make':
-            filename = 'sony_003.dng'
-        elif self.settings.filename == 'camera_model':
-            filename = 'ilce-7m3_003.dng'
-
-        if prefix:
-            filename = f'{prefix.format(date=datetime.now())}_{filename}'
-
-        label = f'{label}/{filename}'
-        self.exampleLabel.setText(label)
-
-    def defaultDestinationChange(self):
-        self.settings.default_destination = self.destinationLine.text()
-        self.updateExampleLabel()
-        logging.info(f'Default destination changed to {self.settings.default_destination}')
-
-    def folderStructureChange(self):
-        self.settings.structure = self.structureOptions[self.structureCombo.currentIndex()]
-        self.updateExampleLabel()
-        logging.info(f'Folder structure changed to {self.structureOptions[self.structureCombo.currentIndex()]}')
-
-    def filenameChange(self):
-        self.settings.filename = self.filenameOptions[self.filenameCombo.currentIndex()]
-        self.updateExampleLabel()
-        logging.info(f'Filename changed to {self.filenameOptions[self.filenameCombo.currentIndex()]}')
-
-    def prefixChange(self):
-        self.settings.prefix = self.prefixOptions[self.prefixCombo.currentIndex()]
-        self.updateExampleLabel()
-        logging.info(f'Prefix changed to {self.prefixOptions[self.prefixCombo.currentIndex()]}')
 
 
 class PresetManagementDialog(QDialog):
@@ -433,6 +275,7 @@ class PresetManagementDialog(QDialog):
 
 class MainWindow(QMainWindow):
     def __init__(self, *args, **kwargs):
+        logging.critical('!!! MainWindow.__init__ starting - EARLY DEBUG !!!') # Very first line
         super().__init__(*args, **kwargs)
 
         # Set central widget
@@ -445,6 +288,7 @@ class MainWindow(QMainWindow):
         self.active_preset_name = None
         self.loaded_preset_settings_snapshot = None
         self.preset_is_modified = False
+        self.PRESET_NAME_MAX_DISPLAY_CHARS = 35 # Max characters for preset name in combobox
 
         # Paths
         self.sourcePath = None
@@ -460,9 +304,10 @@ class MainWindow(QMainWindow):
 
         # Setup custom font
         fontDB = QFontDatabase()
-        fontDB.addApplicationFont(str(Path(__file__).parent / 'data' / 'fonts' / 'SourceSans3-Regular.otf'))
-        fontDB.addApplicationFont(str(Path(__file__).parent / 'data' / 'fonts' / 'SourceSans3-Bold.otf'))
-        fontDB.addApplicationFont(str(Path(__file__).parent / 'data' / 'fonts' / 'SourceSans3-Light.otf'))
+        # Use utils.resource_path for font files
+        fontDB.addApplicationFont(str(utils.resource_path('data/fonts/SourceSans3-Regular.otf')))
+        fontDB.addApplicationFont(str(utils.resource_path('data/fonts/SourceSans3-Bold.otf')))
+        fontDB.addApplicationFont(str(utils.resource_path('data/fonts/SourceSans3-Light.otf')))
         font = QFont('Source Sans 3')
         font.setStyleStrategy(QFont.PreferAntialias)
         self.setFont(font)
@@ -473,41 +318,28 @@ class MainWindow(QMainWindow):
         try:
             logging.info(f"PRE_DEST_CALL_DIAG: About to interact with self.settings.")
             logging.info(f"PRE_DEST_CALL_DIAG: Type of self.settings: {type(self.settings)}")
-            logging.shutdown()
             if hasattr(self.settings, 'destination'):
                 logging.info(f"PRE_DEST_CALL_DIAG: self.settings has attribute 'destination'. Type: {type(self.settings.destination)}")
-                logging.shutdown()
-                # For extreme check, see if we can even get the method object itself
-                # method_obj = getattr(self.settings, 'destination')
-                # logging.info(f"PRE_DEST_CALL_DIAG: getattr(self.settings, 'destination') is {method_obj}")
-                # logging.shutdown()
             else:
                 logging.info("PRE_DEST_CALL_DIAG: self.settings has NO 'destination' attribute.")
-                logging.shutdown()
         except Exception as e_pre_log:
             logging.critical(f"PRE_DEST_CALL_DIAG: CRITICAL - Error in pre-call logging for self.settings.destination: {e_pre_log}", exc_info=True)
-            logging.shutdown()
 
         # The problematic call
         try:
             logging.info("PRE_DEST_CALL_DIAG: Attempting to call self.settings.destination()...")
-            logging.shutdown()
-            self.destPath = self.settings.destination()
-            logging.info(f"PRE_DEST_CALL_DIAG: self.settings.destination() call completed.")
-            logging.shutdown()
+            self.destPath = self.settings.destination() # RESTORED
+            # self.destPath = Path().home() # REMOVE temporary safe default
+            logging.info(f"PRE_DEST_CALL_DIAG: self.settings.destination() call COMPLETED. self.destPath is: {self.destPath}") # Updated log
         except Exception as e_dest_call: # Catch Python-level exceptions from the call itself
             logging.critical(f"PRE_DEST_CALL_DIAG: CRITICAL PYTHON EXCEPTION during self.settings.destination() call: {e_dest_call}", exc_info=True)
-            logging.shutdown()
-            # Fallback self.destPath if the call fails at Python level (though SIGABRT is more likely)
-            self.destPath = Path().home() 
+            self.destPath = Path().home() # Fallback remains
 
         # Log self.destPath value and type AFTER the call
         try:
             logging.info(f"INIT_UI_DIAG: self.destPath value after call: '{self.destPath}' (type: {type(self.destPath)})")
-            logging.shutdown()
         except Exception as e_log_init:
             logging.critical(f"INIT_UI_DIAG: CRITICAL - Error logging self.destPath post-call: {e_log_init}", exc_info=True)
-            logging.shutdown()
 
         self.destSize = 0
         self.iconSize = 48
@@ -533,6 +365,10 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(self.styles)
         self.initUI()
 
+        # Set initial window size and minimum width
+        self.resize(1200, 450) # Adjusted default size: wider and less tall
+        self.setMinimumWidth(700) # Minimum sensible width
+
         # Show UI
         self.show()
 
@@ -543,19 +379,14 @@ class MainWindow(QMainWindow):
     def initUI(self):
         mainLayout = QVBoxLayout()
 
-        # Presets Layout
-        presetsLayout = QHBoxLayout()
-        presetsLayout.addWidget(QLabel("Preset:"))
+        # Initialize PresetComboBox here as it's used by other methods called before it's added to a layout
         self.presetComboBox = QComboBox()
-        self.presetComboBox.addItem("None (Default Settings)") # Default option
+        self.presetComboBox.setObjectName("PresetComboBoxMid") # For styling
+        # Add "None (Default Settings)" with full name as userData
+        none_text = "None (Default Settings)"
+        self.presetComboBox.addItem(self._truncate_text(none_text, self.PRESET_NAME_MAX_DISPLAY_CHARS), none_text)
         self.populatePresetsComboBox()
-        self.presetComboBox.activated[str].connect(self.applyPreset) # Connect signal
-        presetsLayout.addWidget(self.presetComboBox)
-        
-        managePresetsButton = QPushButton("Manage Presets...")
-        managePresetsButton.clicked.connect(self.openPresetManagementDialog) # Placeholder for now
-        presetsLayout.addWidget(managePresetsButton)
-        mainLayout.addLayout(presetsLayout)
+        self.presetComboBox.activated[int].connect(self._handle_preset_selection_by_index) # Connect to index signal
 
         mainColsLayout = QHBoxLayout()
 
@@ -569,12 +400,25 @@ class MainWindow(QMainWindow):
         midLayout = QVBoxLayout()
         arrow = QLabel('→')
         arrow.setObjectName('arrow')
+        arrow.setAlignment(QtCore.Qt.AlignCenter) # Center the arrow
         midLayout.addWidget(arrow)
+        midLayout.addSpacerItem(QSpacerItem(20, 10, QSizePolicy.Minimum, QSizePolicy.Expanding))
 
-        # Settings
-        settingsButton = QPushButton('...')
-        settingsButton.clicked.connect(self.settingsDialog)
-        midLayout.addWidget(settingsButton)
+        # Add Preset ComboBox to midLayout and center it
+        midLayout.addWidget(self.presetComboBox, 0, QtCore.Qt.AlignCenter)
+
+        # Add Manage Presets Text Button to midLayout
+        self.managePresetsButton = QPushButton("Settings") # Changed to text
+        self.managePresetsButton.setObjectName("ManageSettingsTextButton") # New object name for styling
+        self.managePresetsButton.setToolTip("Manage Presets")
+        self.managePresetsButton.clicked.connect(self.openPresetManagementDialog)
+        midLayout.addWidget(self.managePresetsButton, 0, QtCore.Qt.AlignCenter) # Align center
+        midLayout.addSpacerItem(QSpacerItem(20, 10, QSizePolicy.Minimum, QSizePolicy.Expanding))
+
+        # Settings button (three dots) removed
+        # settingsButton = QPushButton('...')
+        # settingsButton.clicked.connect(self.settingsDialog)
+        # midLayout.addWidget(settingsButton)
 
         # Add middle layout and spacer
         mainColsLayout.addLayout(midLayout)
@@ -583,14 +427,11 @@ class MainWindow(QMainWindow):
         # Destination column
         try:
             logging.info("INIT_UI_DIAG: Calling self.destColumn()...")
-            logging.shutdown()
             dest_col_layout = self.destColumn()
             logging.info("INIT_UI_DIAG: self.destColumn() returned.")
-            logging.shutdown()
             mainColsLayout.addLayout(dest_col_layout)
         except Exception as e_destcol:
             logging.critical(f"INIT_UI_DIAG: CRITICAL - Error calling or adding self.destColumn(): {e_destcol}")
-            logging.shutdown()
             # Add a placeholder if it fails
             mainColsLayout.addLayout(QVBoxLayout())
 
@@ -621,16 +462,12 @@ class MainWindow(QMainWindow):
         self.destPathLabel.setObjectName('dest-path')
         try:
             logging.info(f"INIT_UI_DIAG: Attempting self.destPathLabel.setText(self.pathLabelText(self.destPath)) for path: {self.destPath}")
-            logging.shutdown()
             path_label_text_val = self.pathLabelText(self.destPath)
             logging.info(f"INIT_UI_DIAG: self.pathLabelText returned: '{path_label_text_val}'")
-            logging.shutdown()
             self.destPathLabel.setText(path_label_text_val)
             logging.info("INIT_UI_DIAG: Successfully set destPathLabel text.")
-            logging.shutdown()
         except Exception as e_dpl_settext:
             logging.critical(f"INIT_UI_DIAG: CRITICAL - Error in destPathLabel.setText or pathLabelText: {e_dpl_settext}")
-            logging.shutdown()
             try:
                 self.destPathLabel.setText("Error displaying path")
             except: pass # Ignore if this also fails
@@ -638,13 +475,10 @@ class MainWindow(QMainWindow):
         mainPathsLayout.addWidget(self.destPathLabel)
         try:
             logging.info("INIT_UI_DIAG: Calling self.updateDestInfo()...")
-            logging.shutdown()
             self.updateDestInfo()
             logging.info("INIT_UI_DIAG: self.updateDestInfo() returned.")
-            logging.shutdown()
         except Exception as e_upd_dest_info:
             logging.critical(f"INIT_UI_DIAG: CRITICAL - Error calling self.updateDestInfo(): {e_upd_dest_info}")
-            logging.shutdown()
 
         mainLayout.addLayout(mainPathsLayout)
         # Progress
@@ -681,110 +515,159 @@ class MainWindow(QMainWindow):
         self._centralWidget.setLayout(mainLayout)
 
     def populatePresetsComboBox(self):
-        current_selection = self.presetComboBox.currentText()
+        current_full_selection_name = None
+        # If a preset is active, store its full name to reselect it later
+        if self.active_preset_name:
+            current_full_selection_name = self.active_preset_name
+        elif self.presetComboBox.currentIndex() != -1: # If no active_preset_name, but something is selected
+            current_full_selection_name = self.presetComboBox.itemData(self.presetComboBox.currentIndex())
+
         self.presetComboBox.clear()
-        self.presetComboBox.addItem("None (Default Settings)")
-        preset_names = self.preset_manager.get_preset_names()
-        for name in preset_names:
-            self.presetComboBox.addItem(name)
+        # Add "None (Default Settings)" with full name as userData
+        none_text = "None (Default Settings)"
+        self.presetComboBox.addItem(self._truncate_text(none_text, self.PRESET_NAME_MAX_DISPLAY_CHARS), none_text)
         
-        # Restore previous selection if it still exists
-        index = self.presetComboBox.findText(current_selection)
+        preset_names = self.preset_manager.get_preset_names() # These are full names
+        for name in preset_names:
+            self.presetComboBox.addItem(self._truncate_text(name, self.PRESET_NAME_MAX_DISPLAY_CHARS), name) # Store full name as userData
+        
+        # Restore previous selection using full name from userData
+        if current_full_selection_name:
+            for i in range(self.presetComboBox.count()):
+                if self.presetComboBox.itemData(i) == current_full_selection_name:
+                    self.presetComboBox.setCurrentIndex(i)
+                    break
+        else: # Default to "None (Default Settings)" if nothing was selected or to be restored
+            self.presetComboBox.setCurrentIndex(0)
+
+        # If no active preset, ensure applyPreset is called for default to set up snapshot etc.
+        # This case is important if populate is called and results in "None" being selected by default.
+        if not self.active_preset_name and self.presetComboBox.currentIndex() == 0:
+            # This might be redundant if applyPreset is always called after populate, but good for safety
+            # self.applyPreset(self.presetComboBox.itemData(0)) # Ensure default state is correctly applied
+            pass # applyPreset will be called by _handle_preset_selection_by_index or externally
+
+    def _handle_preset_selection_by_index(self, index: int):
         if index != -1:
-            self.presetComboBox.setCurrentIndex(index)
-        else:
-            self.active_preset_name = None # Clear active preset if it was deleted
-            # If the previously active preset was deleted, apply default settings
-            if current_selection != "None (Default Settings)": # Avoid re-applying if already on default
-                 self.applyPreset("None (Default Settings)")
+            full_preset_name = self.presetComboBox.itemData(index)
+            self.applyPreset(full_preset_name) # Call applyPreset with the full name
 
     def applyPreset(self, preset_name_or_default_text: str):
-        # Strip "(edited)" suffix if present, as self.active_preset_name should be the base name
-        if preset_name_or_default_text.endswith(" (edited)"):
-            base_preset_name = preset_name_or_default_text[:-9]
-        else:
-            base_preset_name = preset_name_or_default_text
+        # preset_name_or_default_text is now guaranteed to be the full, non-truncated name
+        base_preset_name = preset_name_or_default_text.replace(" (edited)", "") # Still handle if (edited) was manually appended
 
         if base_preset_name == "None (Default Settings)" or not base_preset_name:
-            self.active_preset_name = None
-            self.loaded_preset_settings_snapshot = None
-            self.preset_is_modified = False
-            logging.info("Applying default settings.")
-            
-            # Revert self.settings to system defaults/last saved general settings
-            self.settings.structure = self.settings._read_setting('structure') or self.settings._default_settings['structure']
-            self.settings.prefix = self.settings._read_setting('prefix') or self.settings._default_settings['prefix']
-            self.settings.filename = self.settings._read_setting('filename') # Can be None
-            
-            # Update destPath from general settings
-            self.destPath = self.settings.destination() # This handles logic for latest_destination, default_destination, or home
-
-            # Update Offloader with default settings
-            if self.offloader:
-                self.offloader.update_from_settings(preset_settings=None)
-            self._update_preset_display_in_combobox() # Update display for default settings
-        else:
-            self.active_preset_name = base_preset_name # Store the base name
-            preset_settings_from_manager = self.preset_manager.get_preset(self.active_preset_name)
-            if preset_settings_from_manager:
-                logging.info(f"Applying preset: {self.active_preset_name}")
-                
-                # Update self.settings to reflect the preset
-                self.settings.structure = preset_settings_from_manager.get('folder_structure')
-                self.settings.prefix = preset_settings_from_manager.get('filename_prefix')
-                self.settings.filename = preset_settings_from_manager.get('filename_preset')
-                # Update destPath from preset
-                self.destPath = preset_settings_from_manager.get('target_location') 
-                if self.destPath:
-                    self.settings.latest_destination = str(self.destPath)
-
-                # Take a snapshot for modification tracking
-                self.loaded_preset_settings_snapshot = {
-                    'target_location': str(self.destPath) if self.destPath else None, # Store as string for consistent comparison
-                    'folder_structure': self.settings.structure,
-                    'filename_prefix': self.settings.prefix,
-                    'filename_preset': self.settings.filename,
-                    'file_types': preset_settings_from_manager.get('file_types', []) # Get from original preset data
-                }
+            try:
+                self.active_preset_name = None
+                self.loaded_preset_settings_snapshot = None
                 self.preset_is_modified = False
+                logging.info("Applying default settings.") # Existing log
+                
+                logging.debug("APPLYPRESET_NONE_DIAG: Resetting self.settings properties to defaults.")
+                # Directly assign from _default_settings
+                self.settings.structure = self.settings._default_settings['structure']
+                self.settings.prefix = self.settings._default_settings['prefix']
+                self.settings.filename = self.settings._default_settings['filename'] # This can be None
+                logging.debug("APPLYPRESET_NONE_DIAG: self.settings properties reset to defaults.")
 
-                # Update Offloader with preset settings
+                logging.debug("APPLYPRESET_NONE_DIAG: Updating self.destPath using self.settings.destination() for default.")
+                self.destPath = self.settings.destination() # This will use its internal logic for defaults
+                logging.debug(f"APPLYPRESET_NONE_DIAG: self.destPath reset to: {self.destPath}")
+
                 if self.offloader:
-                    self.offloader.update_from_settings(preset_settings=preset_settings_from_manager)
-            else:
-                logging.warning(f"Preset '{self.active_preset_name}' not found. Applying default settings.")
-                self.presetComboBox.setCurrentIndex(0) # Switch to "None"
-                self.active_preset_name = None # Explicitly set to None before recursive call
-                self.applyPreset("None (Default Settings)") # Recursive call to apply defaults
-                return # Important to return after recursive call to avoid double UI update
+                    logging.debug("APPLYPRESET_NONE_DIAG: Updating offloader from settings (preset_settings=None).")
+                    self.offloader.update_from_settings(preset_settings=None)
+                    logging.debug("APPLYPRESET_NONE_DIAG: Offloader updated.")
+                else:
+                    logging.debug("APPLYPRESET_NONE_DIAG: Offloader is None, skipped update.")
+                
+                logging.debug("APPLYPRESET_NONE_DIAG: Scheduling _update_preset_display_in_combobox.")
+                QtCore.QTimer.singleShot(0, self._update_preset_display_in_combobox)
+                logging.debug("APPLYPRESET_NONE_DIAG: 'None (Default Settings)' block finished successfully.")
+            except Exception as e_apply_none:
+                logging.critical(f"APPLYPRESET_NONE_DIAG: CRITICAL EXCEPTION in 'None (Default Settings)' block: {e_apply_none}", exc_info=True)
+                # Depending on severity, might want to return or show error to user
+        else:
+            try:
+                self.active_preset_name = base_preset_name # Store the base name
+                preset_settings_from_manager = self.preset_manager.get_preset(self.active_preset_name)
+                if preset_settings_from_manager:
+                    logging.info(f"Applying preset: {self.active_preset_name}")
+                    
+                    logging.debug(f"APPLYPRESET_DIAG: Updating self.settings from preset '{self.active_preset_name}'.")
+                    self.settings.structure = preset_settings_from_manager.get('folder_structure')
+                    self.settings.prefix = preset_settings_from_manager.get('filename_prefix')
+                    self.settings.filename = preset_settings_from_manager.get('filename_preset')
+                    self.destPath = preset_settings_from_manager.get('target_location') 
+                    if self.destPath:
+                        self.settings.latest_destination = str(self.destPath)
+                    logging.debug(f"APPLYPRESET_DIAG: self.settings updated. self.destPath: {self.destPath}")
+
+                    logging.debug("APPLYPRESET_DIAG: Creating loaded_preset_settings_snapshot.")
+                    self.loaded_preset_settings_snapshot = {
+                        'target_location': str(self.destPath) if self.destPath else None,
+                        'folder_structure': self.settings.structure,
+                        'filename_prefix': self.settings.prefix,
+                        'filename_preset': self.settings.filename,
+                        'file_types': preset_settings_from_manager.get('file_types', [])
+                    }
+                    self.preset_is_modified = False
+                    logging.debug("APPLYPRESET_DIAG: Snapshot created, preset_is_modified set to False.")
+
+                    if self.offloader:
+                        logging.debug("APPLYPRESET_DIAG: Updating offloader with preset settings.")
+                        self.offloader.update_from_settings(preset_settings=preset_settings_from_manager)
+                        logging.debug("APPLYPRESET_DIAG: Offloader updated.")
+                    else:
+                        logging.debug("APPLYPRESET_DIAG: Offloader is None, skipped update.")
+                else:
+                    logging.warning(f"Preset '{self.active_preset_name}' not found. Applying default settings.")
+                    self.presetComboBox.setCurrentIndex(0) 
+                    self.active_preset_name = None 
+                    self.applyPreset("None (Default Settings)") 
+                    return 
+                logging.debug(f"APPLYPRESET_DIAG: Preset '{self.active_preset_name}' block finished successfully.")
+            except Exception as e_apply_preset:
+                logging.critical(f"APPLYPRESET_DIAG: CRITICAL EXCEPTION in preset '{self.active_preset_name}' block: {e_apply_preset}", exc_info=True)
+                # Depending on severity, might want to return or show error to user
 
         # Common UI updates for both preset and default application
-        # Update destination path display elements
-        if self.destPath: # destPath could be str (from preset or settings.destination()) or Path
-            # Convert to Path for consistent handling, Path(str_path) is generally safe for local paths.
-            # For NAS/problematic paths, this might be where issues arise if not careful.
-            # Preset target_location is saved as str, settings.destination() can also return str.
+        try:
+            logging.debug("APPLYPRESET_COMMON_UI: Starting common UI updates.")
             current_dest_path_for_ui = Path(self.destPath) if isinstance(self.destPath, str) else self.destPath
             
-            try:
-                self.destPathLabel.setText(self.pathLabelText(current_dest_path_for_ui))
-                self.destTitleLabel.setText(current_dest_path_for_ui.name if current_dest_path_for_ui else "N/A")
-            except Exception as e:
-                logging.error(f"Error updating destination UI for path '{current_dest_path_for_ui}': {e}")
-                self.destPathLabel.setText("Error displaying path")
-                self.destTitleLabel.setText("Error")
-        else: # Should not happen if settings.destination() has fallbacks
-            self.destPathLabel.setText("No destination selected")
-            self.destTitleLabel.setText("N/A")
+            if self.destPath:
+                logging.debug(f"APPLYPRESET_COMMON_UI: Updating destPathLabel and destTitleLabel for path: {current_dest_path_for_ui}")
+                try:
+                    self.destPathLabel.setText(self.pathLabelText(current_dest_path_for_ui))
+                    self.destTitleLabel.setText(current_dest_path_for_ui.name if current_dest_path_for_ui else "N/A")
+                    logging.debug("APPLYPRESET_COMMON_UI: destPathLabel and destTitleLabel updated.")
+                except Exception as e_dest_ui:
+                    logging.error(f"APPLYPRESET_COMMON_UI: Error updating destination UI for path '{current_dest_path_for_ui}': {e_dest_ui}", exc_info=True)
+                    self.destPathLabel.setText("Error displaying path")
+                    self.destTitleLabel.setText("Error")
+            else:
+                logging.debug("APPLYPRESET_COMMON_UI: self.destPath is None. Setting labels to defaults.")
+                self.destPathLabel.setText("No destination selected")
+                self.destTitleLabel.setText("N/A")
 
-        self.updateDestInfo() # Updates free space, relies on self.destPath
-        if self.offloader: # Ensure offloader exists before trying to update source info
-             self.updateSourceInfo() # Re-filter files based on new settings/preset
+            logging.debug("APPLYPRESET_COMMON_UI: Calling updateDestInfo().")
+            self.updateDestInfo()
+            logging.debug("APPLYPRESET_COMMON_UI: updateDestInfo() called.")
+            
+            if self.offloader:
+                 logging.debug("APPLYPRESET_COMMON_UI: Calling updateSourceInfo().")
+                 self.updateSourceInfo()
+                 logging.debug("APPLYPRESET_COMMON_UI: updateSourceInfo() called.")
+            else:
+                logging.debug("APPLYPRESET_COMMON_UI: Offloader is None, skipped updateSourceInfo().")
         
-        self._update_preset_display_in_combobox() # Update display after applying
-        
-        # The example label in SettingsDialog relies on self.settings, which should now be up-to-date.
-        # No need to call self.updateExamplePathLabel() if it's a placeholder.
+            logging.debug("APPLYPRESET_COMMON_UI: Scheduling _update_preset_display_in_combobox.")
+            QtCore.QTimer.singleShot(0, self._update_preset_display_in_combobox)
+            logging.debug("APPLYPRESET_COMMON_UI: Common UI updates finished successfully.")
+        except Exception as e_common_updates:
+            logging.critical(f"APPLYPRESET_COMMON_UI: CRITICAL EXCEPTION in common UI updates: {e_common_updates}", exc_info=True)
+            # Depending on severity, might want to return or show error to user
 
     def updateExamplePathLabel(self):
         # This method would construct the example path string based on current
@@ -807,23 +690,41 @@ class MainWindow(QMainWindow):
             current_main_window_preset_selection = self.presetComboBox.currentText()
             self.applyPreset(current_main_window_preset_selection)
 
-    def settingsDialog(self):
-        """Open the settings dialog to make changes to settings"""
-        # app = QApplication(sys.argv)
-        logging.debug(f'Settings dialog opened')
-        settings_dialog = SettingsDialog() # Renamed to avoid conflict with self.settings
-        settings_dialog.exec_()
-        self._check_and_update_preset_modified_status()
-
     def updateProgressBar(self, progress):
         self.progressBar.setValue(int(progress.get('percentage', 0)))
         self.progressFiles.setText(progress.get('action', ''))
         self.progressPercent.setText(f'{int(progress.get("percentage", ""))}%')
         self.timer.time_left = progress.get('time')
-        if progress['is_finished'] and self.offloader._running:
+
+        if progress.get('is_file_error'):
+            file_error_msg = progress.get('file_error_message', "An unknown file error occurred.")
+            logging.warning(f"File processing error signaled: {file_error_msg}")
+            # For now, we log it. GUI will show the overall progress, report will detail skipped/failed files.
+            # A QStatusBar could be used here for non-modal error messages if desired in future.
+            # self.statusBar().showMessage(f"File error: {file_error_msg}", 5000) # Example if status bar exists
+
+        if progress.get('is_fatal_error'):
+            fatal_error_msg = progress.get('fatal_error_message', "A critical error occurred during the offload.")
+            logging.critical(f"Fatal error signaled: {fatal_error_msg}")
+            QMessageBox.critical(self, "Critical Error", fatal_error_msg)
+            self.timer.running = False
+            self.offloadButton.setText('Error')
+            self.offloadButton.setStyleSheet(f"#offload-btn {{background:{self.colors['red']};color:{self.colors['white']};}}")
+            try:
+                self.offloadButton.clicked.disconnect()
+            except TypeError:
+                pass
+            self.offloadButton.clicked.connect(self.reset_app) # Allow reset after fatal error
+            return # Stop further processing of this signal
+
+        if progress['is_finished'] and self.offloader._running: # check self.offloader still exists
             self.finished()
-        elif progress['is_finished'] and not self.offloader._running:
+        elif progress['is_finished'] and self.offloader and not self.offloader._running:
             self.canceled()
+        elif progress['is_finished'] and not self.offloader: # Offloader might have crashed and set itself to None
+            logging.error("Offloader is None in updateProgressBar when is_finished is true. Assuming error/cancel.")
+            self.canceled() # Treat as canceled or errored state
+
         self.updateDestInfo()
 
     def canceled(self):
@@ -988,8 +889,7 @@ class MainWindow(QMainWindow):
     def destColumn(self):
         # dest title
         try:
-            logging.info(f"DEST_COL_DIAG: Creating destTitleLabel. self.destPath: {self.destPath} (type: {type(self.destPath)})") 
-            logging.shutdown()
+            logging.info(f"DEST_COL_DIAG: Creating destTitleLabel. self.destPath: {self.destPath} (type: {type(self.destPath)})")
             dest_display_name = "N/A"
 
             if isinstance(self.destPath, str):
@@ -997,49 +897,38 @@ class MainWindow(QMainWindow):
                     # If it's a string (potentially NAS path), get basename via Path conversion temporarily for display
                     # This is a controlled point where Path(NAS_string) might occur.
                     logging.info(f"DEST_COL_DIAG: self.destPath is string '{self.destPath}'. Attempting Path() for .name.")
-                    logging.shutdown()
                     temp_path_obj = Path(self.destPath)
                     dest_display_name = temp_path_obj.name
                     logging.info(f"DEST_COL_DIAG: For string self.destPath, .name is '{dest_display_name}'")
-                    logging.shutdown()
                 except Exception as e_str_name:
                     logging.critical(f"DEST_COL_DIAG: CRITICAL - Error getting .name from string self.destPath '{self.destPath}': {e_str_name}. This could be the SIGABRT point for NAS string.", exc_info=True)
-                    logging.shutdown()
                     dest_display_name = "Error (str-path)"
             elif isinstance(self.destPath, Path):
                 if hasattr(self.destPath, 'name'):
                     try:
                         # If it's a Path object, get .name. This is the SIGABRT point if it's a NAS Path object.
                         logging.info(f"DEST_COL_DIAG: self.destPath is Path. Attempting .name for {self.destPath}")
-                        logging.shutdown()
                         dest_display_name = self.destPath.name
                         logging.info(f"DEST_COL_DIAG: For Path self.destPath, .name is '{dest_display_name}'")
-                        logging.shutdown()
                     except Exception as e_path_name:
                         logging.critical(f"DEST_COL_DIAG: CRITICAL - Error accessing .name for Path self.destPath {self.destPath}: {e_path_name}. This IS THE SIGABRT point for NAS Path object.", exc_info=True)
-                        logging.shutdown()
                         dest_display_name = "Error (path-obj)"
                 else:
                     logging.info(f"DEST_COL_DIAG: self.destPath is Path but has no .name attribute: {self.destPath}")
-                    logging.shutdown()
                     # dest_display_name remains "N/A"
             else: # self.destPath is None or other type
                 logging.info(f"DEST_COL_DIAG: self.destPath is None or type '{type(self.destPath)}'. Using 'N/A'.")
-                logging.shutdown()
                 # dest_display_name remains "N/A"
             
             self.destTitleLabel = QLabel(str(dest_display_name)) # Ensure string for QLabel
             logging.info(f"DEST_COL_DIAG: QLabel created with text: '{str(dest_display_name)}'")
-            logging.shutdown()
 
         except Exception as e_title:
             logging.critical(f"DEST_COL_DIAG: CRITICAL - Error creating destTitleLabel: {e_title}")
-            logging.shutdown()
             # Fallback
             self.destTitleLabel = QLabel("Error")
             try:
                 logging.info("DEST_COL_DIAG: destTitleLabel fallback to 'Error'")
-                logging.shutdown()
             except: pass
 
         self.destTitleLabel.setMinimumWidth(250)
@@ -1069,15 +958,12 @@ class MainWindow(QMainWindow):
         folder_path_str = None
         try:
             logging.info("BROWSE_RAW: Calling QFileDialog.getExistingDirectory...")
-            logging.shutdown()
             folder_path_str = dialog.getExistingDirectory(None, 'Select Folder', str(start_dir), QFileDialog.ShowDirsOnly)
             logging.info(f"BROWSE_RAW: QFileDialog.getExistingDirectory returned: '{folder_path_str}'")
-            logging.shutdown()
             # DO NOT CONVERT TO PATH HERE. Return raw string.
-            return folder_path_str 
+            return folder_path_str
         except Exception as e:
             logging.critical(f"BROWSE_RAW: CRITICAL PYTHON EXCEPTION: {e}", exc_info=True)
-            logging.shutdown()
             return None
 
     def browseSource(self):
@@ -1096,113 +982,75 @@ class MainWindow(QMainWindow):
         raw_path_str_from_dialog = None
         try:
             logging.info("BROWSE_DEST_RAW: Calling self.browse() ...")
-            logging.shutdown()
             # Revert diagnostic hardcoding, use self.destPath (which can be str or Path)
             start_dir_for_browse = str(self.destPath if self.destPath is not None else Path().home())
             logging.info(f"BROWSE_DEST_RAW: Using start_dir: '{start_dir_for_browse}' for QFileDialog.")
-            logging.shutdown()
             raw_path_str_from_dialog = self.browse(start_dir=start_dir_for_browse)
             logging.info(f"BROWSE_DEST_RAW: self.browse() returned raw string: '{raw_path_str_from_dialog}'")
-            logging.shutdown()
-        except Exception as e: 
+        except Exception as e:
             logging.critical(f"BROWSE_DEST_RAW: CRITICAL PYTHON EXCEPTION calling self.browse(): {e}", exc_info=True)
-            logging.shutdown()
             raw_path_str_from_dialog = None
 
         if raw_path_str_from_dialog:
-            # Step 1: Attempt to save raw string to settings
-            try:
-                logging.info(f"BROWSE_DEST_RAW_STEP1: Attempting to set settings.latest_destination with raw string: '{raw_path_str_from_dialog}'")
-                logging.shutdown()
-                self.settings.latest_destination = raw_path_str_from_dialog # Settings class handles Path conversion & str()
-                logging.info(f"BROWSE_DEST_RAW_STEP1: Successfully set settings.latest_destination.")
-                logging.shutdown()
-            except Exception as e_settings:
-                logging.critical(f"BROWSE_DEST_RAW_STEP1: CRITICAL PYTHON EXCEPTION during settings.latest_destination: {e_settings}", exc_info=True)
-                logging.shutdown()
-                # Attempt to update UI to show error, then return to prevent further processing
-                try:
-                    self.destTitleLabel.setText("Error Saving Settings")
-                    self.destPathLabel.setText(f"Path: '{raw_path_str_from_dialog[:30]}...'") # Show truncated raw path
-                    self.destInfoLabel.setText("Free: Error")
-                except Exception as e_ui_settings:
-                    logging.error(f"BROWSE_DEST_RAW_STEP1: Failed to set error UI: {e_ui_settings}", exc_info=True)
-                    logging.shutdown()
-                return # Stop further processing if settings save fails at Python level
+            # Step 1: Validate if the string is not empty or whitespace (already handled by QFileDialog usually)
+            if not raw_path_str_from_dialog.strip():
+                logging.warning("BROWSE_DEST_RAW_STEP1: QFileDialog returned an empty or whitespace string. Aborting.")
+                return
 
-            # Step 2: Attempt to create Path object
-            path_obj_for_nas = None
+            logging.info(f"BROWSE_DEST_RAW_STEP1: QFileDialog returned valid string: '{raw_path_str_from_dialog}'. Proceeding.")
+
+            # Step 2: Attempt to create Path object (potential SIGABRT for NAS paths)
+            path_obj_for_nas = None # Initialize for clarity
             try:
                 logging.info(f"BROWSE_DEST_RAW_STEP2: Attempting Path('{raw_path_str_from_dialog}')...")
-                logging.shutdown()
                 path_obj_for_nas = Path(raw_path_str_from_dialog)
                 logging.info(f"BROWSE_DEST_RAW_STEP2: Successfully created Path object: {path_obj_for_nas}")
-                logging.shutdown()
             except Exception as e_path_create:
                 logging.critical(f"BROWSE_DEST_RAW_STEP2: CRITICAL PYTHON EXCEPTION during Path() creation: {e_path_create}", exc_info=True)
-                logging.shutdown()
                 try:
                     self.destTitleLabel.setText("Error Processing Path String")
                     self.destPathLabel.setText(f"Path: '{raw_path_str_from_dialog[:30]}...'")
                     self.destInfoLabel.setText("Free: Error")
                 except Exception as e_ui_path:
                     logging.error(f"BROWSE_DEST_RAW_STEP2: Failed to set error UI: {e_ui_path}", exc_info=True)
-                    logging.shutdown()
                 return # Stop further processing
-            
+
             # Step 3: Assign to self.destPath
             try:
                 logging.info(f"BROWSE_DEST_RAW_STEP3: Assigning Path object to self.destPath: {path_obj_for_nas}")
-                logging.shutdown()
                 self.destPath = path_obj_for_nas
                 logging.info(f"BROWSE_DEST_RAW_STEP3: Successfully assigned to self.destPath.")
-                logging.shutdown()
             except Exception as e_assign:
                 logging.critical(f"BROWSE_DEST_RAW_STEP3: CRITICAL PYTHON EXCEPTION during self.destPath assignment: {e_assign}", exc_info=True)
-                logging.shutdown()
-                # Unlikely to fail here if Path object creation succeeded, but good practice
                 return
 
             # Step 4: Attempt to log self.destPath (which triggers str() on Path object)
             try:
                 logging.info(f"BROWSE_DEST_RAW_STEP4: Attempting to log self.destPath (triggers str()): {self.destPath}")
-                logging.shutdown()
             except Exception as e_log_str:
                 logging.critical(f"BROWSE_DEST_RAW_STEP4: CRITICAL PYTHON EXCEPTION during logging f-string (str(self.destPath)): {e_log_str}", exc_info=True)
-                logging.shutdown()
-                # If this fails, the crash is str(Path_object) related
-                # UI might be in an intermediate state, updateDest might not be called.
                 return
 
             # Step 5: Call updateDest()
             try:
                 logging.info(f"BROWSE_DEST_RAW_STEP5: Calling self.updateDest() for path: {self.destPath}")
-                logging.shutdown()
                 self.updateDest()
                 logging.info(f"BROWSE_DEST_RAW_STEP5: self.updateDest() completed for path: {self.destPath}")
-                logging.shutdown()
             except Exception as e_update_dest:
                 logging.critical(f"BROWSE_DEST_RAW_STEP5: CRITICAL PYTHON EXCEPTION during self.updateDest(): {e_update_dest}", exc_info=True)
-                logging.shutdown()
-                # UI might be partially updated or error state shown within updateDest already.
 
             # Original logic for offloader destination update
             if self.offloader: 
                 try:
                     logging.info(f"BROWSE_DEST_RAW: Updating offloader destination with: {self.destPath}")
-                    logging.shutdown()
                     self.offloader.destination = self.destPath
                     logging.info("BROWSE_DEST_RAW: Successfully updated offloader destination.")
-                    logging.shutdown()
                 except Exception as e_offloader:
                     logging.error(f"BROWSE_DEST_RAW: Error updating offloader destination: {e_offloader}", exc_info=True)
-                    logging.shutdown()
             else:
                 logging.warning("BROWSE_DEST_RAW: Offloader not initialized when trying to set destination path.")
-                logging.shutdown()
         else:
             logging.warning("BROWSE_DEST_RAW: No path received from self.browse().")
-            logging.shutdown()
 
     def updateSource(self):
         # Update ui
@@ -1225,7 +1073,6 @@ class MainWindow(QMainWindow):
         else: # It's None or unexpected type
             logging.info(f"UPDATE_SOURCE_DIAG: sourcePath is None or unexpected type: {type(self.sourcePath)}")
             path_name = "N/A" # Stays N/A or as initialized
-        logging.shutdown()
 
         self.sourceTitleLabel.setText(path_name)
         # pathLabelText should handle str, Path, or None for self.sourcePath
@@ -1247,11 +1094,6 @@ class MainWindow(QMainWindow):
             else: # self.sourcePath is None or other non-Path/non-str type
                 self.offloader.source = None
                 logging.info(f"UPDATE_SOURCE_DIAG: Set offloader.source to None as sourcePath is {type(self.sourcePath)}")
-            logging.shutdown()
-            self.updateSourceInfo() # This uses self.offloader.source_files which should be updated by Offloader.source setter
-        else:
-            logging.warning("UPDATE_SOURCE_DIAG: Offloader not initialized.")
-            logging.shutdown()
 
     def updateDest(self):
         """Update all the destination related UI elements. Path label, progress bar"""
@@ -1262,7 +1104,6 @@ class MainWindow(QMainWindow):
                     # For display name, try to get basename by converting to Path temporarily
                     try:
                         logging.info(f"UPDATE_DEST_DIAG: self.destPath is string '{self.destPath}', getting .name via Path() for title.")
-                        logging.shutdown()
                         temp_path = Path(self.destPath)
                         self.destTitleLabel.setText(temp_path.name)
                     except Exception as e_title_str:
@@ -1275,55 +1116,45 @@ class MainWindow(QMainWindow):
             else: # self.destPath is None
                 self.destTitleLabel.setText("N/A")
             logging.info(f"UPDATE_DEST_DIAG: destTitleLabel set to '{self.destTitleLabel.text()}'")
-            logging.shutdown()
         except Exception as e:
             logging.error(f"UPDATE_DEST_DIAG: Error setting destination title label: {e}", exc_info=True)
             try:
                 self.destTitleLabel.setText("Error")
             except Exception as e2:
                 logging.error(f"UPDATE_DEST_DIAG: Critical error setting destTitleLabel fallback text: {e2}")
-            logging.shutdown()
 
         try:
             path_text = self.pathLabelText(self.destPath) # self.destPath can be str or Path
             self.destPathLabel.setText(path_text)
             logging.info(f"UPDATE_DEST_DIAG: destPathLabel set to '{path_text}'")
-            logging.shutdown()
         except Exception as e:
             logging.error(f"UPDATE_DEST_DIAG: Error setting destination path label: {e}", exc_info=True)
             try:
                 self.destPathLabel.setText("Error displaying path")
             except Exception as e2:
                 logging.error(f"UPDATE_DEST_DIAG: Critical error setting destPathLabel fallback text: {e2}")
-            logging.shutdown()
-        
+
         try:
             self.updateDestInfo() # Call the now robust updateDestInfo
             logging.info("UPDATE_DEST_DIAG: updateDestInfo() called.")
-            logging.shutdown()
         except Exception as e:
             logging.error(f"UPDATE_DEST_DIAG: Error calling updateDestInfo from updateDest: {e}", exc_info=True)
             # Fallback for destInfoLabel if updateDestInfo itself fails badly
             try:
-                self.destInfoLabel.setText("Free: Error") 
+                self.destInfoLabel.setText("Free: Error")
             except Exception as e2:
                 logging.error(f"UPDATE_DEST_DIAG: Critical error setting destInfoLabel fallback from updateDest: {e2}")
-            logging.shutdown()
 
         # Save to settings
         try:
-            if self.destPath: 
+            if self.destPath:
                 logging.info(f"UPDATE_DEST_DIAG: Attempting to save to settings.latest_destination with value: '{self.destPath}' (type: {type(self.destPath)})")
-                logging.shutdown()
-                self.settings.latest_destination = str(self.destPath) 
+                self.settings.latest_destination = str(self.destPath)
                 logging.info(f'UPDATE_DEST_DIAG: Destination successfully saved to settings.latest_destination.')
-                logging.shutdown()
             else:
                 logging.warning("UPDATE_DEST_DIAG: Attempted to save a None destination path to settings. Skipped.")
-                logging.shutdown()
         except Exception as e_save:
             logging.error(f"UPDATE_DEST_DIAG: Error saving destination to settings.latest_destination: {e_save}", exc_info=True)
-            logging.shutdown()
 
         self._check_and_update_preset_modified_status() # Call added here
 
@@ -1348,7 +1179,7 @@ class MainWindow(QMainWindow):
     def _check_and_update_preset_modified_status(self):
         if not self.active_preset_name or not self.loaded_preset_settings_snapshot:
             self.preset_is_modified = False
-            self._update_preset_display_in_combobox()
+            QtCore.QTimer.singleShot(0, self._update_preset_display_in_combobox) # Deferred update
             return
 
         current_settings_for_comp = self._get_current_settings_for_comparison()
@@ -1370,44 +1201,50 @@ class MainWindow(QMainWindow):
 
         if self.preset_is_modified != modified:
             self.preset_is_modified = modified
-            self._update_preset_display_in_combobox()
+            QtCore.QTimer.singleShot(0, self._update_preset_display_in_combobox) # Deferred update
         elif self.active_preset_name: # Always refresh display if a preset is active, in case its name itself changed elsewhere
-             self._update_preset_display_in_combobox()
+             QtCore.QTimer.singleShot(0, self._update_preset_display_in_combobox) # Deferred update
 
 
     def _update_preset_display_in_combobox(self):
         if not self.active_preset_name:
-            # If no preset is active, ensure "None (Default Settings)" is not marked as edited.
-            # Or handle if self.presetComboBox can be at an index that is not "None" but active_preset_name is None
-            idx = self.presetComboBox.findText("None (Default Settings)")
-            if idx != -1 and self.presetComboBox.itemText(idx).endswith(" (edited)"):
-                 self.presetComboBox.setItemText(idx, "None (Default Settings)")
+            idx = -1
+            for i in range(self.presetComboBox.count()): # Find by userData
+                if self.presetComboBox.itemData(i) == "None (Default Settings)":
+                    idx = i
+                    break
+            if idx != -1:
+                current_text = self.presetComboBox.itemText(idx)
+                base_display_text = self._truncate_text("None (Default Settings)", self.PRESET_NAME_MAX_DISPLAY_CHARS)
+                if current_text.endswith(" (edited)") and self.preset_is_modified: # Should not happen for "None"
+                    pass # "None" should not be marked as edited
+                elif current_text != base_display_text:
+                     self.presetComboBox.setItemText(idx, base_display_text)
             return
 
-        base_name = self.active_preset_name # Base name is stored here
-        display_text = base_name
+        base_name = self.active_preset_name # Full base name
+        display_text_full = base_name
         if self.preset_is_modified:
-            display_text = f"{base_name} (edited)"
+            display_text_full = f"{base_name} (edited)"
+        
+        truncated_display_text = self._truncate_text(display_text_full, self.PRESET_NAME_MAX_DISPLAY_CHARS)
 
-        # Find the item by its base name to update its text
-        # This is tricky because populatePresetsComboBox clears and adds items.
-        # We need to iterate and find, not rely on index if list can change.
+        # Find the item by its full base name (from userData) to update its text
+        found_idx = -1
         for i in range(self.presetComboBox.count()):
-            item_text = self.presetComboBox.itemText(i)
-            # Check against base name or base name + " (edited)"
-            current_base_name = item_text.replace(" (edited)", "")
-            if current_base_name == base_name:
-                if self.presetComboBox.itemText(i) != display_text:
-                    self.presetComboBox.setItemText(i, display_text)
-                # After updating, if this is the current selection, ensure it reflects
-                if self.presetComboBox.currentIndex() == i :
-                     # This might be redundant if currentIndex change signal handles it, but safe
-                     pass
+            if self.presetComboBox.itemData(i) == base_name: # Compare against full base name in userData
+                if self.presetComboBox.itemText(i) != truncated_display_text:
+                    self.presetComboBox.setItemText(i, truncated_display_text)
+                found_idx = i
                 break 
-        # If the active preset was deleted and re-added, or if this is called after populate,
-        # it might not find it if the list was just rebuilt.
-        # applyPreset will call this after it sets active_preset_name and populates.
-
+        
+        # Ensure the correct item is visually current if it was found and updated
+        if found_idx != -1 and self.presetComboBox.currentIndex() != found_idx:
+            # This might be problematic if setCurrentIndex itself triggers activated signal
+            # However, we are just updating text, current index should ideally remain.
+            # If applyPreset was called due to user selection, currentIndex is already correct.
+            # If applyPreset was called programmatically (e.g. after save), this ensures UI consistency.
+            pass # Let external logic handle setCurrentIndex if needed, to avoid signal loops
 
     def pathLabel(self, path):
         text = path
@@ -1424,44 +1261,35 @@ class MainWindow(QMainWindow):
         Return the path as a string"""
         try:
             logging.info(f"PATH_LABEL_TEXT_DIAG: Received path_input: '{path_input}' (type: {type(path_input)})")
-            logging.shutdown()
             
             path_to_process = path_input
             path_string = ""
 
             if path_to_process is None:
                 logging.info("PATH_LABEL_TEXT_DIAG: path_input is None, returning 'No path selected'")
-                logging.shutdown()
                 return 'No path selected'
 
             if isinstance(path_to_process, str):
                 path_string = path_to_process # Already a string
                 logging.info(f"PATH_LABEL_TEXT_DIAG: path_input is already string: '{path_string}'")
-                logging.shutdown()
             elif isinstance(path_to_process, Path):
                 # This is THE DANGER ZONE if path_to_process is a NAS Path object.
                 # We must attempt str() conversion here and catch potential SIGABRT source.
                 logging.info(f"PATH_LABEL_TEXT_DIAG: path_input is Path object. Attempting str(): {path_to_process}")
-                logging.shutdown()
                 try:
                     path_string = str(path_to_process)
                     logging.info(f"PATH_LABEL_TEXT_DIAG: str(Path) successful, path_string: '{path_string}'")
-                    logging.shutdown()
                 except Exception as e_str_conv:
                     # This will catch Python-level exceptions. A SIGABRT will crash before this.
                     logging.critical(f"PATH_LABEL_TEXT_DIAG: CRITICAL PYTHON EXCEPTION - str(Path) FAILED for {path_to_process}: {e_str_conv}", exc_info=True)
-                    logging.shutdown()
                     return "Error converting Path to string (SIGABRT likely occurred)"
             else: # Other unexpected type
                 logging.warning(f"PATH_LABEL_TEXT_DIAG: path_input is unexpected type '{type(path_to_process)}'. Attempting str().")
-                logging.shutdown()
                 try:
                     path_string = str(path_to_process)
                     logging.info(f"PATH_LABEL_TEXT_DIAG: str(unexpected type) result: '{path_string}'")
-                    logging.shutdown()
                 except Exception as e_unknown_str:
                     logging.error(f"PATH_LABEL_TEXT_DIAG: Failed to str(unexpected type {type(path_to_process)}): {e_unknown_str}", exc_info=True)
-                    logging.shutdown()
                     return "Error: Invalid path type"
 
             # Shorten path if it is too long
@@ -1474,32 +1302,25 @@ class MainWindow(QMainWindow):
                 else: # It was a string or other, try to make a Path from path_string
                     try:
                         logging.info(f"PATH_LABEL_TEXT_DIAG: Path string ('{path_string}') > 50. Attempting Path() for shortening parts.")
-                        logging.shutdown()
                         path_obj_for_parts = Path(path_string) # DANGER for NAS string
                         logging.info(f"PATH_LABEL_TEXT_DIAG: Path(path_string) for shortening successful.")
-                        logging.shutdown()
                     except Exception as e_path_conv_parts:
                         logging.critical(f"PATH_LABEL_TEXT_DIAG: CRITICAL - Path(path_string) for shortening FAILED for '{path_string}': {e_path_conv_parts}. This could be SIGABRT for NAS string.", exc_info=True)
-                        logging.shutdown()
                         # Return the long string if Path conversion fails, rather than erroring further.
                         return path_string 
 
                 if path_obj_for_parts and hasattr(path_obj_for_parts, 'parts') and path_obj_for_parts.parts:
                     shortened_path_string = f'{path_obj_for_parts.parts[0]}...{path_obj_for_parts.parts[-1]}'
                     logging.info(f"PATH_LABEL_TEXT_DIAG: Shortened path to: '{shortened_path_string}'")
-                    logging.shutdown()
                     return shortened_path_string
                 else:
                     logging.warning(f"PATH_LABEL_TEXT_DIAG: Path string '{path_string}' > 50 but couldn't get parts. Returning full string.")
-                    logging.shutdown()
                     return path_string 
             
             logging.info(f"PATH_LABEL_TEXT_DIAG: Path string '{path_string}' <= 50. Returning as is.")
-            logging.shutdown()
             return path_string
         except Exception as e_outer:
             logging.critical(f"PATH_LABEL_TEXT_DIAG: CRITICAL - Outer unhandled exception in pathLabelText for input '{path_input}': {e_outer}", exc_info=True)
-            logging.shutdown()
             return "Error processing path (outer)"
 
     @staticmethod
@@ -1515,6 +1336,11 @@ class MainWindow(QMainWindow):
                 logging.debug(vols)
                 logging.debug(min(vols, key=vols.get))
             return vols
+
+    def _truncate_text(self, text, max_length, placeholder="..."):
+        if len(text) > max_length:
+            return text[:max_length - len(placeholder)] + placeholder
+        return text
 
 
 def run():
